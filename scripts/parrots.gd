@@ -8,7 +8,7 @@ const ORDER := ["budgie", "jaco", "cockatoo", "kakapo"]
 
 const BIRDS := {
 	"budgie": {
-		"name": "Кеша", "kind": "волнистый попугайчик", "skill": "",
+		"name": "Кеша", "gen": "Кеши", "kind": "волнистый попугайчик", "skill": "",
 		"trait": "Рывок: уворачивается от бросков и лапки",
 		"hp": 1.0, "speed": 1.0, "slots": 0, "knock": 1.0, "dodge": 1.0, "notice": 0.0, "scale": 1.0,
 		"col": {"body": Color("79c85f"), "belly": Color("a8dd8c"), "wing": Color("4f9a45"), "bars": Color("1f3d22"),
@@ -16,7 +16,7 @@ const BIRDS := {
 			"beak": Color("f0a64a"), "cere": Color("6d8fd6"), "cheek": Color("8a6fd0"), "crest": "small", "feet": Color("e58a9a")},
 	},
 	"jaco": {
-		"name": "Жако", "kind": "серый жако", "skill": "mimic",
+		"name": "Жако", "gen": "Жако", "kind": "серый жако", "skill": "mimic",
 		"trait": "Умник: +1 слот внимания и замечает тени быстрее, но на 8% медленнее",
 		"hp": 1.0, "speed": 0.92, "slots": 1, "knock": 1.0, "dodge": 1.0, "notice": 0.15, "scale": 1.05,
 		"col": {"body": Color("9ea3a8"), "belly": Color("c4c8cc"), "wing": Color("7b8086"), "bars": Color("5b6066"),
@@ -25,7 +25,7 @@ const BIRDS := {
 			"face": Color("eef0f2")},
 	},
 	"cockatoo": {
-		"name": "Какаду", "kind": "белый какаду", "skill": "crestfan",
+		"name": "Какаду", "gen": "Какаду", "kind": "белый какаду", "skill": "crestfan",
 		"trait": "Хохол дыбом: при здоровье ниже 40% урон +30%, а враги вплотную медленнее на 20%",
 		"hp": 0.95, "speed": 1.05, "slots": 0, "knock": 1.0, "dodge": 0.9, "notice": 0.0, "scale": 1.1,
 		"col": {"body": Color("f4f2ec"), "belly": Color("ffffff"), "wing": Color("e6e2d8"), "bars": Color("c9c3b5"),
@@ -33,7 +33,7 @@ const BIRDS := {
 			"beak": Color("4a4a50"), "cere": Color("f4f2ec"), "cheek": Color(0, 0, 0, 0), "crest": "tall", "feet": Color("9a9aa0")},
 	},
 	"kakapo": {
-		"name": "Какапо", "kind": "совиный попугай", "skill": "boom",
+		"name": "Какапо", "gen": "Какапо", "kind": "совиный попугай", "skill": "boom",
 		"trait": "Тяжеловес: +40% здоровья и почти не отлетает от ударов, но медленнее и не уворачивается",
 		"hp": 1.4, "speed": 0.85, "slots": 0, "knock": 0.3, "dodge": 0.0, "notice": 0.0, "scale": 1.18,
 		"col": {"body": Color("8aa84a"), "belly": Color("c8c46a"), "wing": Color("6e8a38"), "bars": Color("2f3a18"),

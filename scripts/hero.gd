@@ -37,6 +37,8 @@ var rot_left := 0
 var _xp_frac := 0.0
 ## Какой это попугай и его дерево прокачки.
 var bird := "budgie"
+## Проклятия игрока на этот забег.
+var curses: Array = []
 var bperks := {}
 var second_used := false
 var laser_pts: Array = []
@@ -256,11 +258,11 @@ func bdat(k: String) -> float:
 
 
 func max_hp() -> float:
-	return (110.0 + 15.0 * int(meta_up.get("hp", 0)) + 20.0 * lvl_of("fluff")) * bdat("hp") * (1.0 + bp("hp_pct"))
+	return (110.0 + 15.0 * int(meta_up.get("hp", 0)) + 20.0 * lvl_of("fluff") - (25.0 if curses.has("fragile") else 0.0)) * bdat("hp") * (1.0 + bp("hp_pct"))
 
 
 func speed() -> float:
-	return 3.0 * M * bdat("speed") * (1.0 + 0.05 * int(meta_up.get("speed", 0)) + 0.1 * lvl_of("wings") + bp("speed_pct")) * (1.5 if speed_t > 0.0 else 1.0) * (1.0 - slow_k if slow_t > 0.0 else 1.0)
+	return 3.0 * M * bdat("speed") * (1.0 + 0.05 * int(meta_up.get("speed", 0)) + 0.1 * lvl_of("wings") + bp("speed_pct")) * (1.5 if speed_t > 0.0 else 1.0) * (1.0 - slow_k if slow_t > 0.0 else 1.0) * (0.88 if curses.has("heavy") else 1.0)
 
 
 func dmg_mult() -> float:
@@ -280,7 +282,7 @@ func armor() -> float:
 
 ## Опыт с учётом «Прилежания»; дробная часть копится.
 func gain_xp(n: int) -> void:
-	var f := float(n) * (1.0 + 0.06 * int(meta_up.get("xp", 0)) + bp("xp_pct")) + _xp_frac
+	var f := float(n) * (1.0 + 0.06 * int(meta_up.get("xp", 0)) + bp("xp_pct")) * (0.75 if curses.has("hungry") else 1.0) + _xp_frac
 	xp += int(f)
 	_xp_frac = f - floorf(f)
 

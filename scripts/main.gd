@@ -213,6 +213,8 @@ var throw_ready_flash := 0.0
 var _was_cd := false
 ## Сложность забега (0 — обычная, 1 — средняя, 2 — сложная) и зоны на полу (пыль, искры пылесоса).
 var diff := 0
+## Проклятия, действующие в этом забеге.
+var curses_on: Array = []
 ## Скорлупки-мины и вихри попугая.
 var mines: Array = []
 var tornados: Array = []
@@ -409,7 +411,17 @@ func start_run() -> void:
 			hh["waves"][i] = waves_test[i]
 		for ab in Trees.ABIL:
 			hh["nodes"][Trees.node_id(ab, 0, 0)] = 3
-		perks = Trees.perks(meta)
+		# проклятия, которые игрок взял на этот забег, сгорают при старте
+	curses_on = []
+	if not sim:
+		var armed: Array = save.get("armed", [])
+		var owned_c: Dictionary = save.get("curses", {})
+		for c in armed:
+			if int(owned_c.get(c, 0)) > 0:
+				owned_c[c] = int(owned_c[c]) - 1
+				curses_on.append(c)
+		save["armed"] = []
+	perks = Trees.perks(meta)
 	twin_ready = true
 	twin_refill = false
 	combo_flip = false
@@ -452,6 +464,13 @@ func start_run() -> void:
 			if not Skills.BIRD_SKILLS.has(k):
 				skill_pool.append(k)
 	hero.apply_meta(meta["parrot"]["up"], meta.get("quests", []), skill_pool, bird, Parrots.perks(meta, bird))
+	hero.curses = curses_on.duplicate()
+	if curses_on.has("blind"):
+		hero.slots = maxi(1, hero.slots - 1)
+	if curses_on.has("fragile"):
+		hero.hp = hero.max_hp()
+	for c in curses_on:
+		add_thought("Проклятие: %s." % String(Rewards.CURSES[c]["desc"]))
 	for a2 in OS.get_cmdline_user_args():
 		if a2.begins_with("--forceskill="):
 			for k2 in a2.substr(13).split(","):
@@ -1308,8 +1327,9 @@ func _director(delta: float) -> void:
 		for e in enemies:
 			e.blue = 0.8
 	var w := _wave()
-	var minimum: int = int(float(w[1]) * float(Diff.level(diff)["count"]))
-	var interval: float = float(w[2]) / float(Diff.level(diff)["count"])
+	var cnt_k: float = float(Diff.level(diff)["count"]) * (1.25 if curses_on.has("horde") else 1.0)
+	var minimum: int = int(float(w[1]) * cnt_k)
+	var interval: float = float(w[2]) / cnt_k
 	var pack := Trees.wave_at(meta, time)
 	var slip_share := float(w[3])
 	var spray_share := float(w[4])
@@ -2576,23 +2596,27 @@ func pstat_add(k: String, n: float = 1.0) -> void:
 	run_pstats[k] = float(run_pstats.get(k, 0.0)) + n
 
 
+func curse_cd() -> float:
+	return 0.75 if curses_on.has("quick") else 1.0
+
+
 func throw_cd_full() -> float:
-	return maxf(1.2, THROW_CD - pk("throw_cd"))
+	return maxf(1.0, THROW_CD - pk("throw_cd")) * curse_cd()
 
 
 func book_cd_full() -> float:
 	var cd := maxf(4.0, METEOR_CD - pk("book_cd"))
 	if has_pk("librarian") and hero != null and hero.hp_frac() < 0.5:
 		cd *= 0.5
-	return cd
+	return cd * curse_cd()
 
 
 func cage_cd_full() -> float:
-	return maxf(8.0, WAVE_CD - pk("cage_cd"))
+	return maxf(8.0, WAVE_CD - pk("cage_cd")) * curse_cd()
 
 
 func millet_cd_full() -> float:
-	return maxf(10.0, MILLET_CD - pk("millet_cd"))
+	return maxf(10.0, MILLET_CD - pk("millet_cd")) * curse_cd()
 
 
 func cage_trap_time() -> float:
@@ -3120,19 +3144,10 @@ func _finish_tut(kind: String) -> void:
 
 # ---------- финал: улёт попугая, яйцо или перья ----------
 
-const EGG_HERO := [
-	"новый класс попугая: Жако (скоро)",
-	"новый класс попугая: Какаду (скоро)",
-	"новый класс попугая: Какапо (скоро)",
-	"мешок проса для прокачки",
-	"особый квест на следующий забег",
-]
-const EGG_PLAYER := [
-	"+3 пера",
-	"прогресс нового умения лапки",
-	"новая внешка курсора (скоро)",
-	"+5 перьев",
-]
+const ROLL_L := 2.6
+const ROLL_R0 := 0.9
+const ROLL_R := 3.7
+const ROLL_END := 4.3
 
 
 func _begin_outro() -> void:
@@ -3166,6 +3181,8 @@ func _update_outro(dt: float) -> void:
 		meta_t += dt
 	var t: float = outro["t"]
 	_update_fx(dt)
+	if outro.has("roll"):
+		_update_roll(dt)
 	var won: bool = over == "hero_dead"
 	# попугай улетает: при поражении — в панике прямо вверх, при победе — гордо вбок и вверх
 	var v := Vector2(0, -60.0 - 900.0 * t) if won else Vector2(260.0 + 200.0 * t, -220.0 - 300.0 * t)
@@ -3194,30 +3211,71 @@ func _update_outro(dt: float) -> void:
 	_apply_time_scale()
 
 
+## Рулетка: лента замедляется, на каждом проезде награды — щелчок, на остановке — вспышка цвета редкости.
+func roll_pos(side: int, t: float) -> float:
+	var t0 := 0.0 if side == 0 else ROLL_R0
+	var dur := ROLL_L if side == 0 else ROLL_R - ROLL_R0
+	var k := clampf((t - t0) / dur, 0.0, 1.0)
+	return float(Rewards.STOP) * (1.0 - pow(1.0 - k, 4.0))
+
+
+func _update_roll(dt: float) -> void:
+	var ro: Dictionary = outro["roll"]
+	ro["t"] = float(ro["t"]) + dt
+	var t: float = ro["t"]
+	for side in 2:
+		var pos := int(floor(roll_pos(side, t) + 0.5))
+		if pos != int(ro["tick"][side]):
+			ro["tick"][side] = pos
+			sfx("tick", -10.0, 1.0 + 0.04 * pos)
+		var stop_t := ROLL_L if side == 0 else ROLL_R
+		if t >= stop_t and not bool(ro["stopped"][side]):
+			ro["stopped"][side] = true
+			var rw: Dictionary = ro["left"] if side == 0 else ro["right"]
+			var r := int(rw["rarity"])
+			sfx("level", -2.0, 0.9 + 0.15 * r)
+			if r >= 2:
+				sfx("win", -4.0, 1.0 + 0.1 * r)
+			shake = 3.0 + 3.0 * r
+
+
 func _outro_click(p: Vector2) -> void:
+	if outro.has("roll"):
+		var ro: Dictionary = outro["roll"]
+		if float(ro["t"]) < ROLL_END:
+			ro["t"] = ROLL_END
+			ro["stopped"] = [true, true]
+			return
+		outro.erase("roll")
+		Save.store(save)
+		meta_t = 0.0
+		outro["done"] = true
+		return
 	for it in outro["items"]:
 		if it["got"] or Vector2(it["pos"]).distance_to(p) > 34.0:
 			continue
 		it["got"] = true
 		if it["kind"] == "egg":
-			# награда всегда двойная: что-то попугаю, что-то игроку
-			var a: String = EGG_HERO[randi() % EGG_HERO.size()]
-			var b := "+%d перьев" % int(outro["feathers"])
-			outro["reward"] = [a, b]
+			# яйцо — рулетка: слева награда игроку, справа попугаю, цвет — редкость
 			save["feathers"] = int(save.get("feathers", 0)) + int(outro["feathers"])
-			if a == "мешок проса для прокачки":
-				meta["parrot"]["bank"] = int(meta["parrot"]["bank"]) + 300
+			var a := Rewards.roll_player(save)
+			var b := Rewards.roll_parrot(meta)
+			Rewards.apply_player(save, a)
+			Rewards.apply_parrot(meta, b)
+			outro["roll"] = {"t": 0.0, "left": a, "right": b, "lreel": Rewards.reel(a, "player"), "rreel": Rewards.reel(b, "parrot"), "tick": [0, 0], "stopped": [false, false]}
 			var rw: Array = save.get("rewards", [])
-			rw.append({"hero": a, "player": b})
-			save["rewards"] = rw
+			rw.append({"hero": b["label"], "player": a["label"]})
+			save["rewards"] = rw.slice(maxi(0, rw.size() - 30))
+			save["meta"] = meta
 			add_fx({"kind": "confetti", "pos": it["pos"], "dur": 1.4})
 			sfx("egg")
-			sfx("win", -4.0)
 		else:
 			save["feathers"] = int(save.get("feathers", 0)) + 1
 			add_fx({"kind": "sparkle", "pos": it["pos"], "dur": 0.5})
 			sfx("pickup", -4.0, 0.8)
 		Save.store(save)
+	if outro.has("roll"):
+		return
 	if not outro.is_empty() and not bool(outro["done"]):
 		var left := 0
 		for it in outro["items"]:
@@ -3362,6 +3420,25 @@ func _meta_action(act: String) -> void:
 			_cycle_slot(int(parts[1]), 1 if parts[2] == "next" else -1)
 		"pack":
 			buy_pack(parts[1])
+		"chest":
+			hud.chest_open = not hud.chest_open
+			sfx("tick", -4.0, 0.9)
+		"skin":
+			if save.get("cursors", ["white"]).has(parts[1]):
+				save["cursor"] = parts[1]
+				Save.store(save)
+				cursor_imgs = {}
+				_build_cursors()
+				sfx("tick", 0.0, 1.3)
+		"curse":
+			var armed: Array = save.get("armed", [])
+			if armed.has(parts[1]):
+				armed.erase(parts[1])
+			elif int(save.get("curses", {}).get(parts[1], 0)) > 0 and armed.size() < Rewards.MAX_ARMED:
+				armed.append(parts[1])
+			save["armed"] = armed
+			Save.store(save)
+			sfx("tick", 0.0, 1.1)
 
 
 func buy_node(ab: String, bi: int, ni: int) -> bool:

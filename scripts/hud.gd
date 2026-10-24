@@ -21,6 +21,8 @@ var font: Font
 var _shown := {}
 ## Штаб: открытая вкладка и выбранное умение в деревьях.
 var hq_tab := "trees"
+## Сундук на экране меты: расцветки лапки и проклятия.
+var chest_open := false
 var hq_abil := "throw"
 
 
@@ -537,6 +539,9 @@ func _overlay(title: String, sub: String) -> void:
 
 func _draw_end() -> void:
 	var o: Dictionary = game.outro
+	if o.has("roll"):
+		_draw_roll(o["roll"])
+		return
 	if not o.is_empty() and not bool(o["done"]):
 		# сначала — забрать яйцо или перья
 		var t: float = o["t"]
@@ -552,6 +557,8 @@ func _draw_end() -> void:
 const META_PARROT := Rect2(975, 40, 920, 960)
 const META_PLAYER := Rect2(25, 40, 920, 960)
 const NEW_RUN := Rect2(810, 1010, 300, 56)
+const CHEST_BTN := Rect2(500, 1010, 290, 56)
+const CHEST := Rect2(460, 250, 1000, 560)
 
 
 func _meta_t() -> float:
@@ -571,6 +578,19 @@ func _draw_meta() -> void:
 		_draw_player_meta(t - 1.4)
 		draw_set_transform(Vector2.ZERO)
 	if t > 2.0:
+		var ch: Dictionary = game.save.get("curses", {})
+		var n_curses := 0
+		for k in ch:
+			n_curses += int(ch[k])
+		var hc: bool = CHEST_BTN.has_point(game.paw["pos"])
+		Art.card(self, CHEST_BTN, Color(1, 0.93, 0.7) if hc or chest_open else PANEL, Art.frame() + 7, INK, 2.5)
+		var armed: Array = game.save.get("armed", [])
+		var lbl := "Сундук" + (" · проклятий %d" % n_curses if n_curses > 0 else "")
+		if armed.size() > 0:
+			lbl = "Сундук · взято %d" % armed.size()
+		Art.text_c(self, font, CHEST_BTN.get_center() + Vector2(0, 7), lbl, 18, INK)
+		if chest_open:
+			_draw_chest()
 		var hov: bool = NEW_RUN.has_point(game.paw["pos"])
 		Art.card(self, NEW_RUN, Color(1, 0.93, 0.7) if hov else PANEL, Art.frame(), INK, 3.0)
 		Art.text_c(self, font, NEW_RUN.get_center() + Vector2(0, 8), "Новый забег  [R]", 22, INK)
@@ -785,6 +805,23 @@ func unlock_rect(tier: int, i: int) -> Rect2:
 func meta_click(p: Vector2, rmb: bool = false) -> String:
 	if _meta_t() > 2.0 and NEW_RUN.has_point(p) and not rmb:
 		return "new"
+	if _meta_t() > 2.0 and CHEST_BTN.has_point(p) and not rmb:
+		return "chest"
+	if chest_open:
+		if rmb or not CHEST.has_point(p):
+			return "chest"
+		var own: Array = game.save.get("cursors", ["white"])
+		var i := 0
+		for k in PawCursor.SKINS:
+			if chest_skin_rect(i).has_point(p) and own.has(k):
+				return "skin:" + k
+			i += 1
+		i = 0
+		for k in Rewards.CURSES:
+			if chest_curse_rect(i).has_point(p):
+				return "curse:" + k
+			i += 1
+		return ""
 	if _meta_t() < 1.6:
 		return ""
 	if Trees.hq_open(game.meta):
@@ -800,6 +837,179 @@ func meta_click(p: Vector2, rmb: bool = false) -> String:
 				return "buy:" + String(it["key"])
 			i += 1
 	return ""
+
+
+# ---------- сундук ----------
+
+func chest_skin_rect(i: int) -> Rect2:
+	return Rect2(CHEST.position.x + 30 + i * 158, CHEST.position.y + 90, 146, 130)
+
+
+func chest_curse_rect(i: int) -> Rect2:
+	return Rect2(CHEST.position.x + 30 + (i % 3) * 316, CHEST.position.y + 300 + int(i / 3) * 110, 304, 98)
+
+
+func _draw_chest() -> void:
+	draw_rect(Rect2(0, 0, 1920, 1080), Color(0, 0, 0, 0.25))
+	Art.card(self, CHEST, PANEL, Art.frame() + 11, INK, 3.0)
+	var save: Dictionary = game.save
+	var mp: Vector2 = game.paw["pos"]
+	_t(CHEST.position + Vector2(30, 50), "Лапка", 24)
+	_t(CHEST.position + Vector2(140, 50), "расцветки выпадают из яйца", 15, Color(INK, 0.6))
+	var own: Array = save.get("cursors", ["white"])
+	var cur := String(save.get("cursor", "white"))
+	var i := 0
+	for k in PawCursor.SKINS:
+		var r := chest_skin_rect(i)
+		var have: bool = own.has(k)
+		var on: bool = k == cur
+		Art.card(self, r, Color(1, 0.93, 0.7) if on else (PANEL if have else Color(0.9, 0.88, 0.84)), Art.frame() + 20 + i, INK if have else Color(INK, 0.35), 3.0 if on else 1.6)
+		if have:
+			PawCursor.draw_paw(self, r.get_center() + Vector2(0, -6), PawCursor.SKINS[k], 0.0, false, 1.4)
+			Art.text_c(self, font, r.position + Vector2(r.size.x * 0.5, r.size.y - 12), String(PawCursor.SKINS[k]["name"]), 13, INK)
+		else:
+			Art.text_c(self, font, r.get_center() + Vector2(0, 8), "?", 30, Color(INK, 0.35))
+		i += 1
+	_t(CHEST.position + Vector2(30, 280), "Проклятия на следующий забег", 24)
+	var armed: Array = save.get("armed", [])
+	_t(CHEST.position + Vector2(420, 280), "можно взять до %d, сгорают при старте" % Rewards.MAX_ARMED, 15, Color(INK, 0.6))
+	var cs: Dictionary = save.get("curses", {})
+	i = 0
+	for k in Rewards.CURSES:
+		var r := chest_curse_rect(i)
+		var n := int(cs.get(k, 0))
+		var on: bool = armed.has(k)
+		var hov := r.has_point(mp)
+		Art.card(self, r, Color(0.88, 0.8, 1.0) if on else (Color(1, 0.96, 0.85) if hov and n > 0 else (PANEL if n > 0 else Color(0.9, 0.88, 0.84))), Art.frame() + 30 + i, INK if n > 0 else Color(INK, 0.35), 3.0 if on else 1.6)
+		_curse_icon(r.position + Vector2(40, 49), 26.0, n > 0)
+		_t(r.position + Vector2(76, 34), String(Rewards.CURSES[k]["name"]), 17, INK if n > 0 else Color(INK, 0.45))
+		draw_multiline_string(font, r.position + Vector2(76, 56), String(Rewards.CURSES[k]["desc"]), HORIZONTAL_ALIGNMENT_LEFT, 214, 13, 2, Color(INK, 0.7 if n > 0 else 0.4))
+		_t(r.position + Vector2(232, 34), ("взято" if on else "×%d" % n), 15, Color("6a4fb3") if on else Color(INK, 0.6))
+		i += 1
+	Art.text_c(self, font, Vector2(CHEST.get_center().x, CHEST.end.y - 18), "Клик мимо окна — закрыть", 14, Color(INK, 0.5))
+
+
+func _curse_icon(c: Vector2, r: float, on: bool) -> void:
+	var a := 1.0 if on else 0.35
+	draw_circle(c, r, Color(0.35, 0.22, 0.5, a))
+	draw_arc(c, r, 0, TAU, 24, Color(INK, a), 2.0, true)
+	# глаз проклятия
+	Art.fill_blob(self, c, r * 0.65, r * 0.38, Color(0.95, 0.9, 1.0, a))
+	draw_circle(c, r * 0.22, Color(0.55, 0.2, 0.7, a))
+	draw_circle(c, r * 0.1, Color(0.1, 0.05, 0.15, a))
+
+
+## Значок любой награды: перья, лапка, проклятие, просо, умение, попугай.
+func _reward_icon(it: Dictionary, c: Vector2, sz: float) -> void:
+	match String(it["kind"]):
+		"feathers":
+			for k in 3:
+				Icons._glyph(self, "feather", c + Vector2(-12 + k * 12, 4 - absf(k - 1) * 8), sz / 44.0, 1.0)
+		"skin":
+			PawCursor.draw_paw(self, c + Vector2(0, 4), PawCursor.SKINS.get(it["value"], PawCursor.SKINS["white"]), 0.0, false, sz / 34.0)
+		"curse":
+			_curse_icon(c, sz * 0.45, true)
+		"millet":
+			for k in 3:
+				Icons._glyph(self, "millet", c + Vector2(-12 + k * 12, 0), sz / 50.0, 1.0)
+		"skill":
+			Icons.draw(self, String(it["value"]), c, sz, 1.0)
+		"bird":
+			_bird_icon(String(it["value"]), c, sz)
+
+
+## Портрет попугая для наград и экрана Кеши.
+func _bird_icon(b: String, c: Vector2, sz: float) -> void:
+	var col: Dictionary = Parrots.bird(b)["col"]
+	var k := sz / 80.0
+	Art.blob(self, c + Vector2(-6, 14) * k, 22 * k, 20 * k, col["body"], 3.0, 3)
+	Art.blob(self, c + Vector2(6, -12) * k, 20 * k, 19 * k, col["head"], 3.0, 4)
+	if col.has("face"):
+		Art.fill_blob(self, c + Vector2(13, -13) * k, 9 * k, 8 * k, col["face"])
+	if col.has("owl"):
+		Art.fill_blob(self, c + Vector2(13, -10) * k, 12 * k, 11 * k, Color(col["head"]).lightened(0.25))
+	if col["crest"] == "tall":
+		for j in 5:
+			var base := c + Vector2(0, -28) * k
+			var tip := base + Vector2(-14 + j * 5, -26 + absf(j - 2) * 5) * k
+			draw_line(base, tip, Color("f2cf3a"), 5.0 * k, true)
+	draw_circle(c + Vector2(13, -15) * k, 4.5 * k, Color.WHITE)
+	draw_circle(c + Vector2(14, -15) * k, 3.0 * k, INK)
+	var bk := PackedVector2Array([c + Vector2(22, -12) * k, c + Vector2(31, -7) * k, c + Vector2(24, 0) * k])
+	draw_colored_polygon(bk, col["beak"])
+	Art.outline(self, bk, INK, 2.0)
+	var tl := PackedVector2Array([c + Vector2(-20, 20) * k, c + Vector2(-38, 34) * k, c + Vector2(-16, 30) * k])
+	draw_colored_polygon(tl, col["tail1"])
+	Art.outline(self, tl, INK, 2.0)
+
+
+## Рулетка яйца: экран пополам, слева ваша награда, справа — награда Кеши.
+func _draw_roll(ro: Dictionary) -> void:
+	var t: float = ro["t"]
+	draw_rect(Rect2(0, 0, 1920, 1080), Color(0.12, 0.09, 0.08, 0.96))
+	draw_line(Vector2(960, 60), Vector2(960, 1020), Color(1, 1, 1, 0.25), 3.0)
+	for side in 2:
+		var x0 := 0.0 if side == 0 else 960.0
+		var rw: Dictionary = ro["left"] if side == 0 else ro["right"]
+		var reel_items: Array = ro["lreel"] if side == 0 else ro["rreel"]
+		var stopped: bool = ro["stopped"][side]
+		var r := int(rw["rarity"])
+		var rc: Color = Rewards.rarity_col(r)
+		var cx := x0 + 480.0
+		var title := "Ваша награда"
+		if side == 1:
+			title = "Награда %s" % String(Parrots.bird(game.hero.bird)["gen"])
+		Art.text_c(self, font, Vector2(cx, 150), title, 36, Color(1, 0.97, 0.9))
+		var cy := 470.0
+		if stopped:
+			var since0: float = t - (game.ROLL_L if side == 0 else game.ROLL_R)
+			var burst0 := clampf(since0 / 0.5, 0.0, 1.0)
+			for j in 16:
+				var a0 := TAU * j / 16.0 + since0 * 0.6
+				var len0 := (180.0 + 70.0 * r) * (0.4 + 0.6 * burst0)
+				draw_line(Vector2(cx, cy) + Vector2(cos(a0), sin(a0)) * 100.0, Vector2(cx, cy) + Vector2(cos(a0), sin(a0)) * (100.0 + len0), Color(rc, 0.5), 6.0 + 3.0 * r, true)
+		# лента
+		var pos: float = game.roll_pos(side, t)
+		var step := 170.0
+		var band := Rect2(x0 + 30, cy - 95, 900, 190)
+		draw_rect(band, Color(0, 0, 0, 0.35))
+		for i in reel_items.size():
+			var dx := (float(i) - pos) * step
+			if absf(dx) > 470.0:
+				continue
+			var it: Dictionary = reel_items[i]
+			var ic: Color = Rewards.rarity_col(int(it["rarity"]))
+			var fade := 1.0 - clampf((absf(dx) - 250.0) / 220.0, 0.0, 1.0)
+			var cr := Rect2(Vector2(cx + dx - 70, cy - 70), Vector2(140, 140))
+			draw_rect(cr, Color(ic, 0.35 * fade))
+			draw_rect(cr, Color(ic, fade), false, 4.0)
+			if fade > 0.05:
+				_reward_icon(it, cr.get_center(), 80.0)
+		# рамка-прицел: пока крутится — мигает всеми цветами, на остановке — цвет редкости
+		var fc := rc
+		if not stopped:
+			fc = Rewards.rarity_col(int(t * 12.0) % 4)
+		var fr := Rect2(Vector2(cx - 86, cy - 86), Vector2(172, 172))
+		draw_rect(fr, fc, false, 7.0)
+		draw_colored_polygon(PackedVector2Array([Vector2(cx - 16, cy - 108), Vector2(cx + 16, cy - 108), Vector2(cx, cy - 88)]), fc)
+		if stopped:
+			var since: float = t - (game.ROLL_L if side == 0 else game.ROLL_R)
+			# вспышка и лучи цвета редкости
+			var burst := clampf(since / 0.5, 0.0, 1.0)
+			draw_rect(fr.grow(10.0 * (1.0 - burst)), Color(rc, 0.6 * (1.0 - burst)), false, 6.0)
+			Art.text_c(self, font, Vector2(cx, 640), String(Rewards.RARITY[r]["name"]).to_upper(), 28, rc, Color(0, 0, 0, 0.6), 6)
+			Art.text_c(self, font, Vector2(cx, 700), String(rw["label"]), 30, Color(1, 0.97, 0.9), Color(0, 0, 0, 0.6), 6)
+			if side == 0:
+				Art.text_c(self, font, Vector2(cx, 748), "и +%d перьев за забег" % int(game.outro.get("feathers", 0)), 20, Color(1, 0.97, 0.9, 0.75))
+			if r >= 2:
+				for j in 18:
+					var a2 := float(j) * 2.39
+					var q := Vector2(cx, cy) + Vector2(cos(a2), sin(a2)) * (120.0 + 260.0 * burst) + Vector2(0, 200.0 * burst * burst)
+					draw_rect(Rect2(q, Vector2(8, 4)), Color(rc.lightened(0.3), 1.0 - burst))
+	if t >= game.ROLL_END:
+		Art.text_c(self, font, Vector2(960, 950), "Клик — продолжить", 22, Color(1, 0.97, 0.9, 0.6 + 0.4 * sin(Time.get_ticks_msec() * 0.005)))
+	else:
+		Art.text_c(self, font, Vector2(960, 950), "клик — пропустить", 16, Color(1, 0.97, 0.9, 0.4))
 
 
 # ---------- штаб ----------

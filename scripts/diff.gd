@@ -11,9 +11,9 @@ const BIOMES := [
 ]
 
 const LEVELS := [
-	{"name": "Обычная", "short": "обычная комната", "hp": 1.0, "count": 1.0, "speed": 1.0, "dmg": 1.0, "boss_hp": 1.0, "millet": 1.0, "feathers": 0, "color": Color("4f8f3a")},
-	{"name": "Средняя", "short": "средняя комната", "hp": 1.3, "count": 1.15, "speed": 1.05, "dmg": 1.15, "boss_hp": 1.35, "millet": 1.35, "feathers": 1, "color": Color("c98a1e")},
-	{"name": "Сложная", "short": "сложная комната", "hp": 1.65, "count": 1.3, "speed": 1.1, "dmg": 1.3, "boss_hp": 1.75, "millet": 1.8, "feathers": 2, "color": Color("b23a2e")},
+	{"name": "Обычная", "short": "обычная комната", "acc": "обычную комнату", "prep": "обычной комнате", "hp": 1.0, "count": 1.0, "speed": 1.0, "dmg": 1.0, "boss_hp": 1.0, "millet": 1.0, "feathers": 0, "color": Color("4f8f3a")},
+	{"name": "Средняя", "short": "средняя комната", "acc": "среднюю комнату", "prep": "средней комнате", "hp": 1.3, "count": 1.15, "speed": 1.05, "dmg": 1.15, "boss_hp": 1.35, "millet": 1.35, "feathers": 1, "color": Color("c98a1e")},
+	{"name": "Сложная", "short": "сложная комната", "acc": "сложную комнату", "prep": "сложной комнате", "hp": 1.65, "count": 1.3, "speed": 1.1, "dmg": 1.3, "boss_hp": 1.75, "millet": 1.8, "feathers": 2, "color": Color("b23a2e")},
 ]
 
 ## Что нового у врагов на каждой ступени (копится: на сложной действует всё сразу).
@@ -111,11 +111,11 @@ static func choose(meta: Dictionary, greed: float) -> int:
 	if int(hb["runs"]) == 0:
 		why = "Новая комната! Не знаю, что там, но проса должно быть больше."
 	elif best < top and float(hist(meta, top)["last_time"]) < 150.0 and not bool(hist(meta, top)["last_won"]):
-		why = "В %s меня быстро поймали. Подкачаюсь пока в %s." % [LEVELS[top]["short"], LEVELS[best]["short"]]
+		why = "В %s меня быстро поймали. Подкачаюсь пока в %s." % [LEVELS[top]["prep"], LEVELS[best]["prep"]]
 	elif best == top:
-		why = "Иду в %s: там больше проса." % LEVELS[best]["short"]
+		why = "Иду в %s: там больше проса." % LEVELS[best]["acc"]
 	else:
-		why = "В %s надёжнее." % LEVELS[best]["short"]
+		why = "В %s надёжнее." % LEVELS[best]["prep"]
 	data(meta)["next"] = best
 	data(meta)["reason"] = why
 	return best

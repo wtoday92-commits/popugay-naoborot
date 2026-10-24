@@ -121,8 +121,8 @@ func _panel(name: String, visible: bool, from_left: bool, fn: Callable) -> void:
 
 func _draw_hero_card(h: Hero, fr: int) -> void:
 	Art.card(self, Rect2(10, 10, 320, 218), PANEL, fr)
-	_t(Vector2(24, 40), "Кеша", 24)
-	_t(Vector2(94, 39), "упрямый коллекционер", 14, Color(INK, 0.65))
+	_t(Vector2(24, 40), String(Parrots.bird(h.bird)["name"]), 24)
+	_t(Vector2(34 + Art.text_w(font, String(Parrots.bird(h.bird)["name"]), 24), 39), "упрямый коллекционер", 14, Color(INK, 0.65))
 	_t(Vector2(24, 64), "Уровень %d" % h.level, 16)
 	_bar(Rect2(120, 52, 196, 12), float(h.xp) / float(h.xp_next), Color("f2cd5c"), "")
 	_bar(Rect2(24, 74, 292, 20), h.hp_frac(), C_HP if h.hp_frac() >= 0.2 else Color("d95c4a"), "Здоровье %d/%d" % [int(ceil(h.hp)), int(h.max_hp())])
@@ -546,7 +546,7 @@ func _draw_end() -> void:
 		# сначала — забрать яйцо или перья
 		var t: float = o["t"]
 		if t > 1.2:
-			var msg := "Кликните по яйцу: награда и вам, и попугаю" if game.over == "hero_dead" else "Кеша улетел. Соберите выпавшие перья"
+			var msg := "Кликните по яйцу: награда и вам, и попугаю" if game.over == "hero_dead" else "%s улетел. Соберите выпавшие перья" % String(Parrots.bird(game.hero.bird)["name"])
 			Art.text_c(self, font, Vector2(960, 230), msg, 24, Color("8a5a1e"), Color(1, 0.98, 0.9, 0.95), 8)
 		return
 	_draw_meta()
@@ -608,9 +608,11 @@ func _draw_parrot_meta(t: float) -> void:
 	var last: Dictionary = meta.get("last", {})
 	var x := r.position.x + 30
 	var y := r.position.y + 50
-	_t(Vector2(x, y), "Кеша после забега", 30)
+	var lb := String(last.get("bird", "budgie"))
+	_bird_icon(lb, Vector2(x + 26, y - 12), 56.0)
+	_t(Vector2(x + 64, y), "%s после забега" % String(Parrots.bird(lb)["name"]), 30)
 	var res := "сломал пылесос и улетел" if bool(last.get("won", false)) else "попался"
-	_t(Vector2(x + 330, y - 2), res, 20, Color("4f8f3a") if bool(last.get("won", false)) else Color("b23a2e"))
+	_t(Vector2(x + 400, y - 2), res, 20, Color("4f8f3a") if bool(last.get("won", false)) else Color("b23a2e"))
 	y += 40
 	_t(Vector2(x, y), "Собрал проса: %d · в копилке: %d" % [int(last.get("millet", 0)), int(meta["parrot"]["bank"])], 17)
 	y += 30
@@ -632,8 +634,28 @@ func _draw_parrot_meta(t: float) -> void:
 	if dmsg != "":
 		_t(Vector2(x, y), "★ " + dmsg, 16, Color("b07a1e"))
 		y += 24
-	_t(Vector2(x, y), "Дальше: %s. %s" % [String(Diff.level(nd)["short"]), String(Diff.data(meta).get("reason", ""))], 15, Color(INK, 0.75))
+	_t(Vector2(x, y), "Дальше — %s. %s" % [String(Diff.level(nd)["short"]), String(Diff.data(meta).get("reason", ""))], 15, Color(INK, 0.75))
 	y += 30
+	# попугаи: кто есть, сколько вложено в его дерево, кто идёт следующим
+	var nb := Parrots.next_bird(meta)
+	var bx := x
+	for b in Parrots.ORDER:
+		var have: bool = Parrots.owned(meta).has(b)
+		var br := Rect2(bx, y - 4, 200, 56)
+		var on: bool = b == nb
+		Art.card(self, br, Color(1, 0.93, 0.7) if on else (PANEL if have else Color(0.9, 0.88, 0.84)), Art.frame() + 110, INK if have else Color(INK, 0.3), 2.5 if on else 1.3)
+		if have:
+			_bird_icon(b, br.position + Vector2(30, 30), 44.0)
+			_t(br.position + Vector2(60, 24), String(Parrots.bird(b)["name"]), 15)
+			_t(br.position + Vector2(60, 44), "дерево %d/39" % Parrots.bought_total(meta, b) + (" · идёт" if on else ""), 12, Color(INK, 0.6))
+		else:
+			Art.text_c(self, font, br.get_center() + Vector2(0, 6), "? из яйца", 14, Color(INK, 0.4))
+		bx += 210
+	y += 62
+	var breason := String(Parrots.data(meta).get("reason", ""))
+	if breason != "" and Parrots.owned(meta).size() > 1:
+		_t(Vector2(x, y + 6), breason, 14, Color(INK, 0.65))
+		y += 34
 	# квесты прошлого забега
 	var qr: Array = last.get("quest_results", [])
 	if qr.size() > 0:
@@ -669,7 +691,8 @@ func _draw_parrot_meta(t: float) -> void:
 		var lvl := int(meta["parrot"]["up"].get(it["key"], 0))
 		var px := x + col * 290
 		_t(Vector2(px, y + 18), "%s" % it["name"], 15)
-		_pips(Vector2(px + 4, y + 32), lvl, int(it["max"]))
+		_bar(Rect2(px, y + 26, 200, 10), float(lvl) / float(it["max"]), Color("e0a92e"), "")
+		_t(Vector2(px + 208, y + 36), "%d/%d" % [lvl, int(it["max"])], 12, Color(INK, 0.6))
 		col += 1
 		if col == 3:
 			col = 0
@@ -677,14 +700,14 @@ func _draw_parrot_meta(t: float) -> void:
 	if col != 0:
 		y += 46
 	if stage + 1 < Meta.PARROT_STAGES.size():
-		_t(Vector2(x, y + 10), "Новые улучшения откроются, когда Кеша потратит %d проса (сейчас %d)" % [int(Meta.PARROT_STAGES[stage + 1]), int(meta["parrot"].get("spent", 0))], 14, Color(INK, 0.6))
+		_t(Vector2(x, y + 10), "Новые улучшения откроются, когда попугай потратит %d проса (сейчас %d)" % [int(Meta.PARROT_STAGES[stage + 1]), int(meta["parrot"].get("spent", 0))], 14, Color(INK, 0.6))
 		y += 26
 	# умения, которые Кеша уже знает
 	var known := Meta.parrot_skills(meta)
 	var names: Array[String] = []
 	for k in known:
 		names.append(String(Skills.NAMES.get(k, k)))
-	_t(Vector2(x, y + 14), "Умения Кеши: " + ", ".join(names), 15)
+	_t(Vector2(x, y + 14), "Умения попугая: " + ", ".join(names), 15)
 	var locked := 0
 	for sk in Meta.PARROT_SKILLS:
 		if not known.has(sk["key"]):
@@ -719,7 +742,7 @@ func _draw_parrot_meta(t: float) -> void:
 	if offer.is_empty():
 		_t(Vector2(x, y), "Квесты откроются с третьего забега", 17, Color(INK, 0.6))
 		return
-	_t(Vector2(x, y), "Квесты на следующий забег: Кеша выбирает 2 из 6", 17)
+	_t(Vector2(x, y), "Квесты на следующий забег: попугай выбирает 2 из 6", 17)
 	y += 16
 	var picked: Array = last.get("picked", [])
 	for i in offer.size():
@@ -751,7 +774,7 @@ func _draw_player_meta(t: float) -> void:
 	_t(Vector2(x + 400, y - 2), "%d перьев" % feathers, 22, Color("4f8f3a"))
 	y += 30
 	var last: Dictionary = game.meta.get("last", {})
-	_t(Vector2(x, y), "За забег: +%d перьев · ваш урон по Кеше %d · сорвано ивентов %d" % [int(last.get("feathers", 0)), int(game.player_damage), game.events_denied], 15, Color(INK, 0.7))
+	_t(Vector2(x, y), "За забег: +%d перьев · ваш урон по попугаю %d · сорвано ивентов %d" % [int(last.get("feathers", 0)), int(game.player_damage), game.events_denied], 15, Color(INK, 0.7))
 	y += 30
 	var meta: Dictionary = game.meta
 	var shown_locked := false
@@ -763,7 +786,7 @@ func _draw_player_meta(t: float) -> void:
 				items.append(it)
 		var tier_lbl := "Ярус %d" % (tier + 1)
 		if tier > 0 and Diff.unlocked(meta) < 1:
-			tier_lbl += " · откроется, когда Кеша дойдёт до средней комнаты"
+			tier_lbl += " · откроется, когда попугай дойдёт до средней комнаты"
 		_t(Vector2(x, unlock_rect(tier, 0).position.y - 8), tier_lbl, 17, INK if open else Color(INK, 0.4))
 		for i in items.size():
 			var it: Dictionary = items[i]
@@ -785,7 +808,7 @@ func _draw_player_meta(t: float) -> void:
 		if not open and not shown_locked:
 			shown_locked = true
 	if Diff.unlocked(meta) < 2 and Meta.tier_open(meta, 2) and Meta.unlocked(meta, "event4"):
-		Art.text_c(self, font, Vector2(r.get_center().x, unlock_rect(2, 0).end.y + 30), "Всё исследовано. Копите перья: штаб откроется, когда Кеша дойдёт до сложной комнаты", 16, Color("8a5a1e"))
+		Art.text_c(self, font, Vector2(r.get_center().x, unlock_rect(2, 0).end.y + 30), "Всё исследовано. Копите перья: штаб откроется, когда попугай дойдёт до сложной комнаты", 16, Color("8a5a1e"))
 	elif shown_locked or not Meta.tier_open(meta, 2):
 		Art.text_c(self, font, Vector2(r.get_center().x, unlock_rect(2, 0).end.y + 30), "Разблокируйте контент выше, чтобы открыть дальнейшие исследования", 16, Color(INK, 0.65))
 	else:
@@ -793,7 +816,7 @@ func _draw_player_meta(t: float) -> void:
 	var tr := Rect2(r.position.x + 30, r.position.y + 760, 860, 150)
 	Art.card(self, tr, Color(0.9, 0.88, 0.84), Art.frame() + 40, Color(INK, 0.4), 1.8)
 	Art.text_c(self, font, tr.get_center() + Vector2(0, -12), "Штаб", 26, Color(INK, 0.45))
-	Art.text_c(self, font, tr.get_center() + Vector2(0, 20), "откроется, когда Кеша дойдёт до сложной комнаты и будут куплены все исследования выше", 15, Color(INK, 0.45))
+	Art.text_c(self, font, tr.get_center() + Vector2(0, 20), "откроется, когда попугай дойдёт до сложной комнаты и будут куплены все исследования выше", 15, Color(INK, 0.45))
 
 
 func unlock_rect(tier: int, i: int) -> Rect2:
@@ -972,7 +995,7 @@ func _draw_roll(ro: Dictionary) -> void:
 		var pos: float = game.roll_pos(side, t)
 		var step := 170.0
 		var band := Rect2(x0 + 30, cy - 95, 900, 190)
-		draw_rect(band, Color(0, 0, 0, 0.35))
+		draw_rect(band, Color(0.1, 0.08, 0.07, 0.92))
 		for i in reel_items.size():
 			var dx := (float(i) - pos) * step
 			if absf(dx) > 470.0:

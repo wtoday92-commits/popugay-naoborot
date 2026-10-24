@@ -552,9 +552,13 @@ func _process(delta: float) -> void:
 		_begin_outro()
 	var shot_clock := time + (float(outro.get("t", 0.0)) if not outro.is_empty() else 0.0)
 	if shot_at > 0.0 and not outro.is_empty() and float(outro["t"]) > 2.6 and shot_at - time > 4.0:
-		for it in outro["items"]:
-			if not it["got"]:
-				_outro_click(it["pos"])
+		if outro.has("roll"):
+			if float(outro["roll"]["t"]) > ROLL_END + 0.8:
+				_outro_click(Vector2.ZERO)
+		else:
+			for it in outro["items"]:
+				if not it["got"]:
+					_outro_click(it["pos"])
 	if shot_at > 0.0 and shot_clock >= shot_at:
 		# отладочный снимок экрана: `-- --shot=<сек>`
 		shot_at = -1.0

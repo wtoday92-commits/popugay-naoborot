@@ -51,6 +51,8 @@ func _draw() -> void:
 		Art.fill_blob(self, fp + Vector2(0, 14), 14, 5, Color(0, 0, 0, 0.12))
 		Art.fill_blob(self, fp - Vector2(0, hop), 22, 22, Color(1, 0.9, 0.5, 0.35))
 		Icons.draw(self, f["fruit"], fp - Vector2(0, hop), 34.0, clampf(float(f["life"]) / 2.0, 0.3, 1.0), false)
+	for z in game.zones:
+		_draw_zone(z, fr)
 	_draw_aura()
 	for f in game.fx:
 		if f["kind"] == "burnline":
@@ -415,6 +417,10 @@ func _draw_enemy(e: Enemy, fr: int) -> void:
 			_draw_box(e, sd)
 		Enemy.T.BOSS:
 			_draw_boss(e, sd)
+	if e.shield > 0:
+		# броня тапка: голубой полукруг-щиток
+		draw_arc(p, e.radius + 6.0, PI * 1.05, PI * 1.95, 12, Color(0.35, 0.55, 0.85, 0.95), 4.0, true)
+		draw_arc(p, e.radius + 6.0, PI * 1.05, PI * 1.95, 12, Color(0.85, 0.93, 1.0, 0.9), 1.5, true)
 
 
 func _draw_sock(e: Enemy, sd: int, rot: float) -> void:
@@ -981,6 +987,24 @@ func _draw_missile(s: Dictionary, fr: int) -> void:
 	Art.blob(self, p, 7.0, 13.0, Color("f5c84c"), 2.5, fr, a, Color("6a4fb3"))
 
 
+## Пыль замедляет, искры жгут: обе зоны видны сразу, чтобы их было легко обойти.
+func _draw_zone(z: Dictionary, fr: int) -> void:
+	var p: Vector2 = z["pos"]
+	var r: float = z["r"]
+	var k := clampf(float(z["t"]) / 0.3, 0.0, 1.0) * (1.0 - clampf((float(z["t"]) - float(z["life"]) + 0.6) / 0.6, 0.0, 1.0))
+	if z["kind"] == "dust":
+		Art.fill_blob(self, p, r, r * 0.8, Color(0.62, 0.56, 0.5, 0.28 * k), int(z["id"]))
+		for i in 4:
+			var a := float(z["id"]) + i * 1.7 + _time * 0.6
+			Art.fill_blob(self, p + Vector2(cos(a), sin(a)) * r * 0.45, r * 0.32, r * 0.26, Color(0.7, 0.65, 0.6, 0.3 * k), i)
+	else:
+		Art.fill_blob(self, p, r, r * 0.8, Color(1.0, 0.75, 0.2, 0.18 * k), int(z["id"]))
+		for i in 5:
+			var a := float(z["id"]) * 3.1 + i * 1.3
+			var q := p + Vector2(cos(a), sin(a)) * r * 0.6 * absf(sin(_time * 7.0 + i))
+			draw_line(q, q + Vector2(cos(a * 2.0), sin(a * 2.0)) * 8.0, Color(1.0, 0.9, 0.3, k), 2.5, true)
+
+
 func _draw_fx(f: Dictionary, fr: int) -> void:
 	var t: float = f["t"]
 	var k: float = t / float(f["dur"])
@@ -1056,6 +1080,8 @@ func _draw_fx(f: Dictionary, fr: int) -> void:
 			Art.blob(self, p, 50, 30, Color(0.86, 0.74, 0.55, 1.0 - k), 3.0, fr, 0.0, Color(INK, 1.0 - k))
 			for i in 4:
 				draw_line(p + Vector2(-40 + i * 26, -22), p + Vector2(-44 + i * 26, 22), Color(0.6, 0.48, 0.32, 1.0 - k), 2.0)
+		"miss":
+			Art.text_c(self, font, p + Vector2(0, -18 - 14.0 * k), "мимо", 14, Color(0.4, 0.4, 0.45, 1.0 - k), Color(1, 1, 1, 0.7 * (1.0 - k)), 4)
 		"stamp":
 			var a := 1.0 - clampf((k - 0.6) / 0.4, 0.0, 1.0)
 			Art.text_c(self, font, p + Vector2(0, 8), "СОРВАНО", 26, Color(0.75, 0.2, 0.15, a), Color(1, 0.97, 0.9, a), 5)

@@ -588,6 +588,10 @@ func danger_at(p: Vector2, with_meteors: bool = true) -> float:
 		var dist := p.distance_to(c)
 		if dist < re:
 			d += w * (1.0 - dist / re)
+	for z in game.zones:
+		var dz := p.distance_to(z["pos"])
+		if dz < float(z["r"]) + 0.4 * M:
+			d += 0.9 if z["kind"] == "sparks" else 0.45
 	if with_meteors:
 		for m in game.meteors:
 			if not m["landed"] and float(m["notice_t"]) >= 0.0:

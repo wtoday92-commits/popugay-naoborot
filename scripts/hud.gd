@@ -340,7 +340,7 @@ func _draw_top(h: Hero, fr: int) -> void:
 	if b == null:
 		var left: float = game.BOSS_AT - game.time
 		Art.text_c(self, font, Vector2(x + 170, 58), mmss(left), 44, INK if left > 30.0 else Color("b23a2e"))
-		Art.text_c(self, font, Vector2(x + 170, 80), "до пылесоса", 13, Color(INK, 0.6))
+		Art.text_c(self, font, Vector2(x + 170, 80), "до пылесоса · " + String(Diff.level(game.diff)["short"]), 13, Color(Diff.level(game.diff)["color"]))
 	elif not b.dead:
 		Art.text_c(self, font, Vector2(x + 170, 52), "ПЫЛЕСОС", 34, Color("b23a2e"))
 		var enr: bool = game.enraged
@@ -593,7 +593,27 @@ func _draw_parrot_meta(t: float) -> void:
 	_t(Vector2(x + 330, y - 2), res, 20, Color("4f8f3a") if bool(last.get("won", false)) else Color("b23a2e"))
 	y += 40
 	_t(Vector2(x, y), "Собрал проса: %d · в копилке: %d" % [int(last.get("millet", 0)), int(meta["parrot"]["bank"])], 17)
-	y += 34
+	y += 30
+	# лестница сложностей и выбор Кеши на следующий забег
+	var top := Diff.unlocked(meta)
+	var nd := Diff.next_diff(meta)
+	for d in Diff.LEVELS.size():
+		var lv: Dictionary = Diff.LEVELS[d]
+		var cr := Rect2(x + d * 150, y, 140, 34)
+		var open := d <= top
+		var cur := d == nd
+		Art.card(self, cr, Color(lv["color"], 0.25) if cur else (PANEL if open else Color(0.9, 0.88, 0.84)), Art.frame() + 100 + d, INK if open else Color(INK, 0.35), 2.5 if cur else 1.4)
+		Art.text_c(self, font, cr.get_center() + Vector2(0, 6), String(lv["name"]) if open else "???", 15, INK if open else Color(INK, 0.4))
+	var kc := Rect2(x + 450, y, 140, 34)
+	Art.card(self, kc, Color(0.9, 0.88, 0.84), Art.frame() + 104, Color(INK, 0.35), 1.4)
+	Art.text_c(self, font, kc.get_center() + Vector2(0, 6), "Кухня · скоро", 14, Color(INK, 0.4))
+	y += 56
+	var dmsg := String(last.get("diff_msg", ""))
+	if dmsg != "":
+		_t(Vector2(x, y), "★ " + dmsg, 16, Color("b07a1e"))
+		y += 24
+	_t(Vector2(x, y), "Дальше: %s. %s" % [String(Diff.level(nd)["short"]), String(Diff.data(meta).get("reason", ""))], 15, Color(INK, 0.75))
+	y += 30
 	# квесты прошлого забега
 	var qr: Array = last.get("quest_results", [])
 	if qr.size() > 0:
@@ -721,7 +741,10 @@ func _draw_player_meta(t: float) -> void:
 		for it in Meta.PLAYER:
 			if int(it["tier"]) == tier:
 				items.append(it)
-		_t(Vector2(x, unlock_rect(tier, 0).position.y - 8), "Ярус %d" % (tier + 1), 17, INK if open else Color(INK, 0.4))
+		var tier_lbl := "Ярус %d" % (tier + 1)
+		if tier > 0 and Diff.unlocked(meta) < 1:
+			tier_lbl += " · откроется, когда Кеша дойдёт до средней комнаты"
+		_t(Vector2(x, unlock_rect(tier, 0).position.y - 8), tier_lbl, 17, INK if open else Color(INK, 0.4))
 		for i in items.size():
 			var it: Dictionary = items[i]
 			var cr := unlock_rect(tier, i)
@@ -741,14 +764,16 @@ func _draw_player_meta(t: float) -> void:
 		y = unlock_rect(tier, 0).end.y + 10
 		if not open and not shown_locked:
 			shown_locked = true
-	if shown_locked or not Meta.tier_open(meta, 2):
+	if Diff.unlocked(meta) < 2 and Meta.tier_open(meta, 2) and Meta.unlocked(meta, "event4"):
+		Art.text_c(self, font, Vector2(r.get_center().x, unlock_rect(2, 0).end.y + 30), "Всё исследовано. Копите перья: штаб откроется, когда Кеша дойдёт до сложной комнаты", 16, Color("8a5a1e"))
+	elif shown_locked or not Meta.tier_open(meta, 2):
 		Art.text_c(self, font, Vector2(r.get_center().x, unlock_rect(2, 0).end.y + 30), "Разблокируйте контент выше, чтобы открыть дальнейшие исследования", 16, Color(INK, 0.65))
 	else:
 		Art.text_c(self, font, Vector2(r.get_center().x, unlock_rect(2, 0).end.y + 30), "Всё исследовано: следующий экран — штаб с деревьями умений", 16, Color("8a5a1e"))
 	var tr := Rect2(r.position.x + 30, r.position.y + 760, 860, 150)
 	Art.card(self, tr, Color(0.9, 0.88, 0.84), Art.frame() + 40, Color(INK, 0.4), 1.8)
 	Art.text_c(self, font, tr.get_center() + Vector2(0, -12), "Штаб", 26, Color(INK, 0.45))
-	Art.text_c(self, font, tr.get_center() + Vector2(0, 20), "откроется, когда будут куплены все исследования выше", 15, Color(INK, 0.45))
+	Art.text_c(self, font, tr.get_center() + Vector2(0, 20), "откроется, когда Кеша дойдёт до сложной комнаты и будут куплены все исследования выше", 15, Color(INK, 0.45))
 
 
 func unlock_rect(tier: int, i: int) -> Rect2:

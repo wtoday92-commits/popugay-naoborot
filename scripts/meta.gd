@@ -92,6 +92,9 @@ static func up_cost(item: Dictionary, lvl: int) -> int:
 static func tier_open(meta: Dictionary, tier: int) -> bool:
 	if tier == 0:
 		return true
+	# дальше исследования открываются вместе с успехами Кеши: со средней комнаты
+	if Diff.unlocked(meta) < 1:
+		return false
 	for it in PLAYER:
 		if int(it["tier"]) == tier - 1 and not meta["unlocked"].has(it["key"]):
 			return false

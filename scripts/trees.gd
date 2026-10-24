@@ -200,6 +200,8 @@ static func hq(meta: Dictionary) -> Dictionary:
 
 ## Штаб открыт, когда куплены все базовые исследования.
 static func hq_open(meta: Dictionary) -> bool:
+	if Diff.unlocked(meta) < 2:
+		return false
 	for it in Meta.PLAYER:
 		if not Meta.unlocked(meta, it["key"]):
 			return false

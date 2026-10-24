@@ -211,6 +211,11 @@ var cursor_state := ""
 var _cursor_building := false
 var throw_ready_flash := 0.0
 var _was_cd := false
+## Сложность забега (0 — обычная, 1 — средняя, 2 — сложная) и зоны на полу (пыль, искры пылесоса).
+var diff := 0
+var zones: Array = []
+var force_diff := -1
+var boss_phase2 := false
 var _st_done := {}
 
 
@@ -241,6 +246,8 @@ func _ready() -> void:
 			die_at = float(a.substr(6))
 		if a.begins_with("--win="):
 			win_at = float(a.substr(6))
+		if a.begins_with("--diff="):
+			force_diff = int(a.substr(7))
 		if a.begins_with("--enh="):
 			hq_test = a.substr(6).split(",")
 		if a.begins_with("--waves="):
@@ -402,14 +409,23 @@ func start_run() -> void:
 	combo_flip = false
 	run_pstats = {}
 	hero_dodges = 0
+	if force_diff >= 0:
+		Diff.data(meta)["unlocked"] = maxi(Diff.unlocked(meta), force_diff)
+		Diff.data(meta)["next"] = force_diff
+	diff = Diff.next_diff(meta)
+	zones.clear()
+	boss_phase2 = false
 	_generate_room()
 	queue.clear()
-	events_total = 2 + (1 if Meta.unlocked(meta, "event3") else 0) + (1 if Meta.unlocked(meta, "event4") else 0)
-	var slots: Array = [[70.0, 160.0], [50.0, 120.0, 190.0], [40.0, 95.0, 150.0, 200.0]][events_total - 2]
-	var types: Array = Skills.EVENTS.duplicate()
-	types.shuffle()
-	for i in slots.size():
-		queue.append({"type": types[i], "at": slots[i]})
+	# ивенты появляются со средней сложности
+	events_total = 0
+	if diff >= 1:
+		events_total = 2 + (1 if Meta.unlocked(meta, "event3") else 0) + (1 if Meta.unlocked(meta, "event4") else 0)
+		var slots: Array = [[70.0, 160.0], [50.0, 120.0, 190.0], [40.0, 95.0, 150.0, 200.0]][events_total - 2]
+		var types: Array = Skills.EVENTS.duplicate()
+		types.shuffle()
+		for i in slots.size():
+			queue.append({"type": types[i], "at": slots[i]})
 	run_millet = 0
 	fruits_eaten = 0
 	enraged = false
@@ -438,6 +454,9 @@ func start_run() -> void:
 		hero.pos = Vector2(FIELD.position.x - 80, 120)
 	Engine.time_scale = game_speed
 	add_thought("Цель: сломать пылесос, иначе отсюда не выбраться.")
+	var reason := String(Diff.data(meta).get("reason", ""))
+	if reason != "":
+		add_thought(reason)
 	for q in hero.quests:
 		add_thought("Квест: %s." % String(Meta.quest_by_key(q).get("name", q)).to_lower())
 	for note in hero.memory_notes:
@@ -537,6 +556,7 @@ func _step(delta: float) -> void:
 	_update_thrown(delta)
 	_update_missiles(delta)
 	_update_meteors(delta)
+	_update_zones(delta)
 	_update_delayed()
 	_update_pickups(delta)
 	_update_fx(delta)
@@ -1264,8 +1284,8 @@ func _director(delta: float) -> void:
 		for e in enemies:
 			e.blue = 0.8
 	var w := _wave()
-	var minimum: int = w[1]
-	var interval: float = w[2]
+	var minimum: int = int(float(w[1]) * float(Diff.level(diff)["count"]))
+	var interval: float = float(w[2]) / float(Diff.level(diff)["count"])
 	var pack := Trees.wave_at(meta, time)
 	var slip_share := float(w[3])
 	var spray_share := float(w[4])
@@ -1360,10 +1380,14 @@ func spawn_enemy(type: int, p: Vector2, from_player: bool = false) -> Enemy:
 	var hp_k := (1.0 + HORDE_HP_GONG * l) * (1.0 + HORDE_HP_LEVEL * hl)
 	if type == Enemy.T.BOSS or type == Enemy.T.BOX:
 		hp_k = 1.0 + 0.05 * float(hero.level)
+	var dl := Diff.level(diff)
+	hp_k *= float(dl["boss_hp"]) if type == Enemy.T.BOSS else float(dl["hp"])
 	e.max_hp = float(d["hp"]) * hp_k
 	e.hp = e.max_hp
-	e.speed = float(d["speed"]) * M * (1.0 + 0.03 * l)
-	e.dmg = float(d["dmg"]) * (1.0 + 0.06 * l) * (1.0 + HORDE_DMG_LEVEL * hl)
+	e.speed = float(d["speed"]) * M * (1.0 + 0.03 * l) * float(dl["speed"])
+	e.dmg = float(d["dmg"]) * (1.0 + 0.06 * l) * (1.0 + HORDE_DMG_LEVEL * hl) * float(dl["dmg"])
+	if type == Enemy.T.SLIPPER and diff >= 1:
+		e.shield = 1
 	e.radius = d["r"]
 	e.push_factor = d["push"]
 	e.xp = d["xp"]
@@ -1471,6 +1495,10 @@ func _update_enemies(delta: float) -> void:
 		e.fear = maxf(0.0, e.fear - delta)
 		e.tumble = maxf(0.0, e.tumble - delta)
 		e.orbit_cd = maxf(0.0, e.orbit_cd - delta)
+		if diff >= 2 and e.type == Enemy.T.SLIPPER and e.shield == 0:
+			e.shield_t -= delta
+			if e.shield_t <= 0.0:
+				e.shield = 1
 		if e.burn > 0.0:
 			e.burn -= delta
 			damage_enemy(e, e.burn_dps * delta, Vector2.ZERO, false)
@@ -1524,7 +1552,7 @@ func _update_enemies(delta: float) -> void:
 				elif d < 1.5 * M and e.grab_cd <= 0.0 and e.stun <= 0.0:
 					# перед хватом приседает и растопыривает пальцы: 0,5 с предупреждения
 					e.grab_state = 1
-					e.grab_t = 0.5
+					e.grab_t = 0.3 if diff >= 2 else 0.5
 			Enemy.T.BOX:
 				e.phase += delta * 10.0
 				dir = _flee_dir(e, -dir)
@@ -1636,6 +1664,12 @@ func _update_super(e: Enemy, delta: float, d: float, dir: Vector2) -> float:
 		_:
 			e.state_t -= delta
 			if e.state_t <= 0.0:
+				# сложная: второй рывок сразу за первым
+				if diff >= 2 and e.state != 3:
+					e.state = 3
+					e.state_t = 0.3
+					e.dash_dir = (hero.pos - e.pos).normalized()
+					return 11.0 * M
 				e.state = 0
 				e.ability_cd = 3.0
 			return 11.0 * M
@@ -1647,6 +1681,13 @@ func _update_super(e: Enemy, delta: float, d: float, dir: Vector2) -> float:
 func _update_boss(e: Enemy, delta: float, d: float, dir: Vector2) -> float:
 	e.phase += delta
 	e.ability_cd -= delta
+	if diff >= 2 and not boss_phase2 and e.hp < e.max_hp * 0.5:
+		boss_phase2 = true
+		e.speed *= 1.3
+		banner("Пылесос перегрелся!", Color("b23a2e"), 36, 2.4)
+		sfx("boss", 0.0, 1.5)
+		add_fx({"kind": "ring", "pos": e.pos, "r": 6.0 * M, "dur": 0.6, "color": Color(1.0, 0.75, 0.2, 0.9)})
+		add_thought("Он перегрелся и искрит! Осторожно.")
 	match e.state:
 		0:
 			if e.ability_cd <= 0.0 and e.stun <= 0.0:
@@ -1692,6 +1733,9 @@ func _update_boss(e: Enemy, delta: float, d: float, dir: Vector2) -> float:
 		3:
 			e.state_t -= delta
 			var nxt := e.pos + e.dash_dir * 14.0 * M * delta
+			# средняя: за пылесосом стелется пыль; перегретый — оставляет искры
+			if diff >= 1 and int(e.phase * 10.0) % 2 == 0:
+				_add_zone(e.pos, 1.3 * M, "sparks" if boss_phase2 else "dust", 4.0)
 			var hit_wall := not floor_rect.grow(-e.radius - 2.0).has_point(nxt)
 			if e.pos.distance_to(hero.pos) < e.radius + hero.radius + 6.0 and hero.stun <= 0.0:
 				hero.take_damage(15.0 + horde_level, "boss", "Пылесос", false)
@@ -1700,7 +1744,15 @@ func _update_boss(e: Enemy, delta: float, d: float, dir: Vector2) -> float:
 				shake = 7.0
 			if hit_wall or e.state_t <= 0.0:
 				e.state = 0
-				e.ability_cd = 2.2
+				e.ability_cd = 2.2 * (0.6 if boss_phase2 else 1.0)
+				if boss_phase2 and not hit_wall and e.combo == 0:
+					# перегрев: второй рывок подряд
+					e.combo = 1
+					e.state = 2
+					e.state_t = 0.5
+					e.dash_dir = (hero.pos - e.pos).normalized()
+					return 0.0
+				e.combo = 0
 				if hit_wall:
 					_boss_slam(e)
 				return 0.0
@@ -1708,8 +1760,9 @@ func _update_boss(e: Enemy, delta: float, d: float, dir: Vector2) -> float:
 		4:
 			e.state_t -= delta
 			if e.state_t <= 0.0:
-				for i in 6:
-					var a := TAU * i / 6.0
+				var nd := 9 if diff >= 1 else 6
+				for i in nd:
+					var a := TAU * i / float(nd)
 					spawn_enemy(Enemy.T.DUST, resolve_circle(e.pos + Vector2(cos(a), sin(a)) * (e.radius + 20.0), 9.0))
 				add_fx({"kind": "dust", "pos": e.pos, "r": 70.0, "dur": 0.6})
 				sfx("pop", 0.0, 0.5)
@@ -1780,6 +1833,19 @@ func src_label(e: Enemy) -> String:
 func damage_enemy(e: Enemy, amount: float, kb: Vector2, show: bool = true, src: String = "") -> void:
 	if e.dead:
 		return
+	if src != "" and not e.from_player:
+		# средняя сложность: носки иногда отскакивают, броня тапка гасит удар
+		if e.type == Enemy.T.SOCK and diff >= 1 and randf() < 0.12:
+			e.tumble = 0.2
+			e.push_vel += kb.normalized().rotated(randf_range(-1.2, 1.2)) * 120.0
+			add_fx({"kind": "miss", "pos": e.pos, "dur": 0.35})
+			return
+		if e.shield > 0:
+			e.shield -= 1
+			e.shield_t = 6.0
+			e.flash = 0.1
+			add_fx({"kind": "ring", "pos": e.pos, "r": e.radius + 10.0, "dur": 0.25, "color": Color(0.45, 0.65, 0.9, 0.9)})
+			return
 	if src != "":
 		dealt_by_src[src] = float(dealt_by_src.get(src, 0.0)) + minf(amount, maxf(e.hp, 0.0))
 	e.hp -= amount
@@ -1805,6 +1871,15 @@ func _kill(e: Enemy) -> void:
 		Enemy.T.YARN:
 			if randf() < 0.6:
 				_drop_gem(e.pos, false)
+			# сложная: клубок распадается на два маленьких
+			if diff >= 2 and not e.small:
+				for k in 2:
+					var y2 := spawn_enemy(Enemy.T.YARN, resolve_circle(e.pos + Vector2(randf_range(-14, 14), randf_range(-14, 14)), 7.0), e.from_player)
+					y2.small = true
+					y2.radius *= 0.65
+					y2.max_hp *= 0.4
+					y2.hp = y2.max_hp
+					y2.xp = 0
 		Enemy.T.SLIPPER, Enemy.T.SUPER:
 			_drop_gem(e.pos, true)
 		Enemy.T.SPRAYER:
@@ -1900,6 +1975,8 @@ func _update_shots(delta: float) -> void:
 			s["life"] = 0.0
 			var lbl := "Пульверизатор из вашей волны" if s["from_player"] else "Пульверизатор"
 			hero.take_damage(float(s["dmg"]), "sprayer", lbl, bool(s["from_player"]))
+			if diff >= 1:
+				hero.slow(1.5, 0.25)
 	enemy_shots = enemy_shots.filter(func(s): return float(s["life"]) > 0.0)
 
 
@@ -2016,6 +2093,26 @@ func _basket_land(m: Dictionary) -> void:
 			if not is_blocked(q) and floor_rect.has_point(q):
 				var e := spawn_enemy(Enemy.T.SOCK, resolve_circle(q, 10.0), true)
 				e.speed *= 1.0 + pk("laundry_fast")
+
+
+func _add_zone(p: Vector2, r: float, kind: String, life: float) -> void:
+	for z in zones:
+		if z["kind"] == kind and Vector2(z["pos"]).distance_to(p) < r * 0.6:
+			z["t"] = 0.0
+			return
+	zones.append({"pos": p, "r": r, "kind": kind, "t": 0.0, "life": life, "id": new_id(), "born": time})
+
+
+## Пыль замедляет попугая, искры жгут. Кеша видит зоны и обходит их.
+func _update_zones(delta: float) -> void:
+	for z in zones:
+		z["t"] = float(z["t"]) + delta
+		if hero.pos.distance_to(z["pos"]) < float(z["r"]):
+			if z["kind"] == "dust":
+				hero.slow(0.2, 0.35)
+			elif z["kind"] == "sparks":
+				hero.add_dot(6.0, 0.6, "Искры пылесоса")
+	zones = zones.filter(func(z): return float(z["t"]) < float(z["life"]))
 
 
 func _update_delayed() -> void:
@@ -2717,7 +2814,7 @@ func _sim_step() -> void:
 			"сломан" if boss_defeated else ("жив" if boss != null else "не появился"), hero.events_done, events_denied,
 			meteor_hits, meteors_cast, kills, hero.chests_opened])
 		print("УРОН ПО ГЕРОЮ: ", dmg_by_src)
-		print("ДАННЫЕ ", JSON.stringify({"over": over, "time": snappedf(time, 0.1), "level": hero.level, "boss_hp": (boss.hp / boss.max_hp if boss != null and not boss.dead else 0.0), "boss": boss_defeated, "skills": hero.skills, "mods": hero.mods.values(), "general": hero.general, "taken": dmg_by_src, "dealt": dealt_by_src, "events": hero.events_done, "events_total": events_total, "millet": run_millet, "feathers": save.get("feathers", 0), "up": meta["parrot"]["up"], "quests": hero.quests, "player_dmg": int(player_damage), "unlocked": meta["unlocked"].keys(), "hq": Trees.bought_total(meta), "enh": Trees.hq(meta)["enh"], "pskills": Meta.parrot_skills(meta), "plan": hero.plan, "kills": kills, "chests": hero.chests_opened, "fruits": fruits_eaten, "rams": rams, "hp_frac": hero.hp_frac(), "qall": _all_quests()}))
+		print("ДАННЫЕ ", JSON.stringify({"over": over, "time": snappedf(time, 0.1), "level": hero.level, "boss_hp": (boss.hp / boss.max_hp if boss != null and not boss.dead else 0.0), "boss": boss_defeated, "skills": hero.skills, "mods": hero.mods.values(), "general": hero.general, "taken": dmg_by_src, "dealt": dealt_by_src, "events": hero.events_done, "events_total": events_total, "millet": run_millet, "feathers": save.get("feathers", 0), "up": meta["parrot"]["up"], "quests": hero.quests, "player_dmg": int(player_damage), "unlocked": meta["unlocked"].keys(), "hq": Trees.bought_total(meta), "diff": diff, "dunl": Diff.unlocked(meta), "enh": Trees.hq(meta)["enh"], "pskills": Meta.parrot_skills(meta), "plan": hero.plan, "kills": kills, "chests": hero.chests_opened, "fruits": fruits_eaten, "rams": rams, "hp_frac": hero.hp_frac(), "qall": _all_quests()}))
 		get_tree().quit()
 
 
@@ -2947,7 +3044,7 @@ func _begin_outro() -> void:
 	if not event.is_empty():
 		_end_event()
 	var player_won: bool = over == "hero_dead"
-	var feathers := Meta.feathers_for(player_damage, events_denied, player_won)
+	var feathers := Meta.feathers_for(player_damage, events_denied, player_won) + int(Diff.level(diff)["feathers"])
 	_save_run(feathers)
 	if sim:
 		return
@@ -3096,7 +3193,7 @@ func _save_run(feathers: int) -> void:
 	st["chests"] = int(st.get("chests", 0)) + hero.chests_opened
 	st["millet"] = int(st.get("millet", 0)) + run_millet
 	var last := {"won": boss_defeated, "millet": run_millet, "quest_results": [], "bought": [], "offer": [], "picked": [], "feathers": feathers}
-	var bank := run_millet
+	var bank := int(float(run_millet) * float(Diff.level(diff)["millet"]))
 	for q in hero.quests:
 		var ok := Meta.quest_done(q, r)
 		last["quest_results"].append([q, ok])
@@ -3104,6 +3201,9 @@ func _save_run(feathers: int) -> void:
 			bank += int(Meta.quest_by_key(q)["reward"])
 	meta["parrot"]["bank"] = int(meta["parrot"]["bank"]) + bank
 	last["ach_new"] = Meta.claim_achievements(meta)
+	last["diff"] = diff
+	last["diff_msg"] = Diff.record(meta, diff, boss_defeated, time)
+	Diff.choose(meta, hero.greed0)
 	last["bought"] = Meta.parrot_shop(meta, mem)
 	# квесты появляются только с третьего забега, чтобы не вываливать всё сразу
 	if int(save["runs"]) >= 2:

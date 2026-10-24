@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Попугай наоборот</title>
+<meta name="description" content="Vampire Survivors наоборот: попугай-ИИ выживает, а вы — орда и кошачья лапка.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #efe4d2; --paper: #fffaf0; --ink: #3a2e28; --muted: #7a6a5e;
+  --accent: #6a4fb3; --gold: #e8b84a; --green: #4f8f3a; --line: #d9cbb4;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #221c18; --paper: #2d2520; --ink: #f1e6d6; --muted: #b9a998;
+    --accent: #a993e6; --gold: #e8b84a; --green: #8fcf74; --line: #4a3e35;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #221c18; --paper: #2d2520; --ink: #f1e6d6; --muted: #b9a998;
+  --accent: #a993e6; --gold: #e8b84a; --green: #8fcf74; --line: #4a3e35;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: Nunito, system-ui, sans-serif; line-height: 1.55; }
+main { max-width: 1040px; margin: 0 auto; padding: 32px 16px 64px; }
+header { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; justify-content: space-between; }
+h1 { font-size: clamp(34px, 6vw, 56px); margin: 0; letter-spacing: -0.5px; }
+.tag { color: var(--muted); font-size: 18px; margin: 6px 0 0; max-width: 560px; }
+.play { display: inline-block; background: var(--gold); color: #3a2e28; text-decoration: none; font-weight: 800; font-size: 22px;
+  padding: 14px 30px; border: 3px solid #3a2e28; border-radius: 14px; box-shadow: 4px 4px 0 #3a2e28; transition: transform .1s; }
+.play:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 #3a2e28; }
+.note { color: var(--muted); font-size: 14px; margin-top: 8px; }
+.shot { margin: 28px 0; border: 3px solid var(--ink); border-radius: 12px; overflow: hidden; background: var(--paper); }
+.shot img { display: block; width: 100%; height: auto; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.card { background: var(--paper); border: 2px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+.card h3 { margin: 0 0 6px; font-size: 19px; }
+.card p { margin: 0; color: var(--muted); }
+h2 { margin: 40px 0 14px; font-size: 28px; }
+table { width: 100%; border-collapse: collapse; background: var(--paper); border-radius: 12px; overflow: hidden; }
+td { padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+td:first-child { font-weight: 700; white-space: nowrap; }
+.gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.gallery figure { margin: 0; }
+.gallery img { width: 100%; border: 2px solid var(--line); border-radius: 10px; display: block; }
+.gallery figcaption { color: var(--muted); font-size: 14px; margin-top: 6px; }
+footer { margin-top: 48px; color: var(--muted); font-size: 14px; }
+a { color: var(--accent); }
+@media (max-width: 600px) { td:first-child { white-space: normal; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Попугай наоборот</h1>
+      <p class="tag">Vampire Survivors наоборот. Выживает волнистый попугай Кеша — игровой ИИ, который сам бегает, клюёт носки и выбирает умения. Вы — орда и кошачья лапка, и ваша цель — поймать его, пока он не сломал робота-пылесоса.</p>
+    </div>
+    <div>
+      <a class="play" href="play/">Играть в браузере</a>
+      <div class="note">Нужна мышь и клавиатура. Сохранение — в браузере.</div>
+    </div>
+  </header>
+
+  <div class="shot"><img src="screenshots/run.png" alt="Забег: попугай, орда носков и панели по бокам"></div>
+
+  <div class="grid">
+    <div class="card"><h3>Попугай думает сам</h3><p>Три слота внимания, поля опасности и интереса, жадность и стресс. Он учится между забегами: помнит, что его било, и меняет план.</p></div>
+    <div class="card"><h3>Вы — орда и лапка</h3><p>Рогатка из носков и тапок, таран лапкой, подменённое просо, книга с полки и клетка, которая ползёт за курсором.</p></div>
+    <div class="card"><h3>Долгая мета</h3><p>Штаб с деревьями умений, ключевые пассивки за достижения, состав волн. Попугай тоже копит просо и открывает новые умения.</p></div>
+  </div>
+
+  <h2>Управление</h2>
+  <table>
+    <tr><td>Рогатка</td><td>зажать ЛКМ на носке или тапке, оттянуть лапку назад и отпустить</td></tr>
+    <tr><td>Таран</td><td>резкий рывок мышью в попугая (с 0:20)</td></tr>
+    <tr><td>Подмена проса</td><td>ЛКМ по крупному колоску: капкан, тухлое, яйцо, снаряд</td></tr>
+    <tr><td>Книга / клетка</td><td>Q с 2:00 / W с 3:00</td></tr>
+    <tr><td>Запрет умения</td><td>когда попугай выбирает умение, кликните одну из трёх карт</td></tr>
+    <tr><td>Пауза, звук, заново</td><td>Пробел, M, R · F2 ускорить, F3 мысли ИИ</td></tr>
+  </table>
+
+  <h2>Кадры</h2>
+  <div class="gallery">
+    <figure><img src="screenshots/hq.png" alt="Штаб: деревья умений"><figcaption>Штаб: у каждого умения 3 ветки с ключевой пассивкой и вершиной</figcaption></figure>
+    <figure><img src="screenshots/waves.png" alt="Штаб: волны"><figcaption>Состав орды на каждые 30 секунд</figcaption></figure>
+    <figure><img src="screenshots/cage.png" alt="Клетка"><figcaption>Клетка ползёт за лапкой, пока растёт тень</figcaption></figure>
+    <figure><img src="screenshots/egg.png" alt="Финал забега"><figcaption>Поймали Кешу: яйцо с наградой обоим</figcaption></figure>
+  </div>
+
+  <footer>Godot 4.7.1, GDScript. Графика рисуется кодом, звук синтезируется на лету. <a href="https://github.com/wtoday92-commits/popugay-naoborot">Исходный код</a>.</footer>
+</main>
+</body>
+</html>

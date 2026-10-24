@@ -6,41 +6,50 @@ extends RefCounted
 
 ## Исследования игрока: ярусы открываются по очереди.
 const PLAYER := [
-	{"key": "millet", "name": "Подмена проса", "desc": "клик по колоску: капкан, тухлое, яйцо, снаряд", "cost": 5, "tier": 0, "icon": "millet"},
-	{"key": "book", "name": "Книга с полки", "desc": "Q: тень и удар по площади", "cost": 6, "tier": 0, "icon": "book"},
-	{"key": "basket", "name": "Корзина-ловушка", "desc": "W: накрывает попугая на 2 с", "cost": 8, "tier": 1, "icon": "basket"},
-	{"key": "block", "name": "Запрет умения", "desc": "на уровне попугая запрещаете 1 карту из 3", "cost": 8, "tier": 1, "icon": "ram"},
-	{"key": "event3", "name": "Третий ивент", "desc": "ещё одна ловушка-возможность до босса", "cost": 5, "tier": 2, "icon": "circle"},
-	{"key": "event4", "name": "Четвёртый ивент", "desc": "и ещё одна", "cost": 6, "tier": 2, "icon": "glow"},
-]
-
-## Прокачка рогатки: сила натяга и ветки. На забег выбирается одна ветка.
-const SLING := [
-	{"key": "power1", "name": "Тугая резинка", "desc": "натяг длиннее, бросок быстрее", "cost": 4, "req": "", "branch": false, "icon": "grab"},
-	{"key": "power2", "name": "Резинка из шины", "desc": "ещё длиннее и быстрее", "cost": 6, "req": "power1", "branch": false, "icon": "grab"},
-	{"key": "fire", "name": "Огненный носок", "desc": "ветка: носок разгорается, урон растёт с дальностью", "cost": 5, "req": "", "branch": true, "icon": "chili"},
-	{"key": "knock", "name": "Тапок-выбивала", "desc": "ветка: тапок выбивает фрукты, издалека — два", "cost": 5, "req": "", "branch": true, "icon": "apple"},
-	{"key": "splash", "name": "Шлепок", "desc": "ветка: слабый натяг бьёт по площади (скоро)", "cost": 0, "req": "", "branch": true, "icon": "out", "soon": true},
+	{"key": "millet", "name": "Подмена проса", "desc": "клик по колоску: капкан, тухлое, яйцо, снаряд", "cost": 6, "tier": 0, "icon": "millet"},
+	{"key": "book", "name": "Книга с полки", "desc": "Q: тень и удар по площади", "cost": 7, "tier": 0, "icon": "book"},
+	{"key": "basket", "name": "Клетка", "desc": "W: клетка ползёт за лапкой и накрывает попугая на 2 с", "cost": 9, "tier": 1, "icon": "basket"},
+	{"key": "block", "name": "Запрет умения", "desc": "на уровне попугая запрещаете 1 карту из 3", "cost": 9, "tier": 1, "icon": "ram"},
+	{"key": "event3", "name": "Третий ивент", "desc": "ещё одна ловушка-возможность до босса", "cost": 7, "tier": 2, "icon": "circle"},
+	{"key": "event4", "name": "Четвёртый ивент", "desc": "и ещё одна", "cost": 8, "tier": 2, "icon": "glow"},
 ]
 
 ## Прокачка попугая за просо: он покупает сам, по своим приоритетам.
+## Пункты открываются этапами по мере того, сколько он уже потратил (stage), чтобы не вываливать всё сразу.
 const PARROT := [
-	{"key": "hp", "name": "Крепкие перья", "desc": "+15 здоровья", "base": 160, "max": 6},
-	{"key": "dmg", "name": "Острый клюв", "desc": "+10% урона", "base": 200, "max": 6},
-	{"key": "speed", "name": "Быстрые лапки", "desc": "+5% скорости", "base": 160, "max": 4},
-	{"key": "magnet", "name": "Длинная шея", "desc": "+15% радиус сбора", "base": 120, "max": 3},
-	{"key": "start", "name": "Разминка", "desc": "+1 стартовый уровень", "base": 460, "max": 3},
-	{"key": "eye", "name": "Зоркий глаз", "desc": "+1 слот внимания", "base": 1150, "max": 1},
+	{"key": "hp", "name": "Крепкие перья", "desc": "+15 здоровья", "base": 160, "max": 8, "stage": 0},
+	{"key": "dmg", "name": "Острый клюв", "desc": "+10% урона", "base": 200, "max": 8, "stage": 0},
+	{"key": "speed", "name": "Быстрые лапки", "desc": "+5% скорости", "base": 160, "max": 5, "stage": 0},
+	{"key": "magnet", "name": "Длинная шея", "desc": "+15% радиус сбора", "base": 250, "max": 3, "stage": 1},
+	{"key": "start", "name": "Разминка", "desc": "+1 стартовый уровень", "base": 900, "max": 3, "stage": 1},
+	{"key": "armor", "name": "Плотный пух", "desc": "−4% любого урона", "base": 600, "max": 5, "stage": 1},
+	{"key": "regen", "name": "Самолечение", "desc": "+0,25 здоровья в секунду", "base": 900, "max": 4, "stage": 2},
+	{"key": "dodge", "name": "Чуткие перья", "desc": "+5% шанс увернуться от бросков и лапки", "base": 900, "max": 4, "stage": 2},
+	{"key": "xp", "name": "Прилежание", "desc": "+6% опыта", "base": 800, "max": 4, "stage": 2},
+	{"key": "eye", "name": "Зоркий глаз", "desc": "+1 слот внимания", "base": 3000, "max": 1, "stage": 3},
+	{"key": "luck", "name": "Удача", "desc": "+3% шанс двойного урона", "base": 1200, "max": 3, "stage": 3},
+]
+## Сколько проса надо потратить, чтобы открылся этап.
+const PARROT_STAGES := [0, 1500, 6000, 15000]
+## Умения, с которыми Кеша приходит в первый раз; остальные открываются просом или достижениями.
+const START_SKILLS := ["feather", "bell", "orbit", "mirror"]
+const PARROT_SKILLS := [
+	{"key": "scream", "name": "Крик", "cost": 1400, "stage": 1, "ach": ""},
+	{"key": "zap", "name": "Искра", "cost": 0, "stage": 0, "ach": "boss3"},
 ]
 
+## Достижения Кеши: каждое что-то даёт (просо или новое умение).
 const ACHIEVEMENTS := [
-	{"key": "boss", "name": "Сломать пылесос", "stat": "boss_kills", "target": 1},
-	{"key": "boss5", "name": "Пылесосная гроза", "stat": "boss_kills", "target": 5},
-	{"key": "kills", "name": "Гроза носков", "stat": "kills", "target": 3000},
-	{"key": "events", "name": "Ивентолог", "stat": "events", "target": 12},
-	{"key": "chests", "name": "Кормушечник", "stat": "chests", "target": 15},
-	{"key": "millet", "name": "Богач", "stat": "millet", "target": 8000},
+	{"key": "boss", "name": "Сломать пылесос", "stat": "boss_kills", "target": 1, "millet": 300},
+	{"key": "dodger", "name": "Ловкач", "stat": "dodges", "target": 60, "millet": 400},
+	{"key": "kills", "name": "Гроза носков", "stat": "kills", "target": 3000, "millet": 600},
+	{"key": "events", "name": "Ивентолог", "stat": "events", "target": 12, "millet": 400},
+	{"key": "boss3", "name": "Пылесосный мастер", "stat": "boss_kills", "target": 3, "skill": "zap"},
+	{"key": "chests", "name": "Кормушечник", "stat": "chests", "target": 15, "millet": 500},
+	{"key": "boss10", "name": "Пылесосная гроза", "stat": "boss_kills", "target": 10, "millet": 1500},
+	{"key": "millet", "name": "Богач", "stat": "millet", "target": 15000, "millet": 1000},
 ]
+
 
 ## Квесты попугая. Пороги выставлены по прогонам: обычные выполняются в 40–65% забегов,
 ## «трудные» (пылесос) — в 20–25%, но за них больше проса. risk ≈ доля забегов, где квест не выполнен.
@@ -59,23 +68,24 @@ const QUESTS := [
 
 
 static func defaults() -> Dictionary:
-	return {"unlocked": {}, "parrot": {"bank": 0, "up": {}}, "stats": {}, "quests": [], "last": {}, "sling": {"owned": {}, "branch": ""}}
+	return {"unlocked": {}, "parrot": {"bank": 0, "up": {}, "spent": 0, "skills": START_SKILLS.duplicate(), "ach": {}}, "stats": {}, "quests": [], "last": {}, "pstats": {}}
 
 
-static func sling_owned(meta: Dictionary, key: String) -> bool:
-	return meta.get("sling", {}).get("owned", {}).has(key)
+static func parrot_stage(meta: Dictionary) -> int:
+	var sp := int(meta["parrot"].get("spent", 0))
+	var st := 0
+	for i in PARROT_STAGES.size():
+		if sp >= int(PARROT_STAGES[i]):
+			st = i
+	return st
 
 
-static func sling_power(meta: Dictionary) -> int:
-	return (1 if sling_owned(meta, "power1") else 0) + (1 if sling_owned(meta, "power2") else 0)
-
-
-static func sling_branch(meta: Dictionary) -> String:
-	return String(meta.get("sling", {}).get("branch", ""))
+static func parrot_skills(meta: Dictionary) -> Array:
+	return meta["parrot"].get("skills", START_SKILLS.duplicate())
 
 
 static func up_cost(item: Dictionary, lvl: int) -> int:
-	return int(float(item["base"]) * pow(1.85, lvl))
+	return int(float(item["base"]) * pow(2.2, lvl))
 
 
 ## Ярус открыт, когда куплено всё в предыдущем ярусе.
@@ -147,35 +157,68 @@ static func choose_quests(offer: Array, greed: float, memory: Dictionary) -> Arr
 	return [scored[0][1], scored[1][1]]
 
 
+## Достижения выдают награду один раз; возвращает подписи новых.
+static func claim_achievements(meta: Dictionary) -> Array:
+	var p: Dictionary = meta["parrot"]
+	if not p.has("ach"):
+		p["ach"] = {}
+	if not p.has("skills"):
+		p["skills"] = START_SKILLS.duplicate()
+	var out: Array = []
+	for a in ACHIEVEMENTS:
+		if p["ach"].has(a["key"]) or float(meta["stats"].get(a["stat"], 0)) < float(a["target"]):
+			continue
+		p["ach"][a["key"]] = true
+		if a.has("skill"):
+			if not p["skills"].has(a["skill"]):
+				p["skills"].append(a["skill"])
+			out.append("%s: новое умение «%s»" % [a["name"], Skills.NAMES[a["skill"]]])
+		else:
+			p["bank"] = int(p["bank"]) + int(a["millet"])
+			out.append("%s: +%d проса" % [a["name"], int(a["millet"])])
+	return out
+
+
 ## Попугай тратит просо сам: сначала то, что лечит его главную беду, потом по кругу.
 static func parrot_shop(meta: Dictionary, memory: Dictionary) -> Array:
 	var bought: Array = []
 	var p: Dictionary = meta["parrot"]
 	var ups: Dictionary = p["up"]
 	var taken: Dictionary = memory.get("taken", {})
-	var hurt := 0.0
-	for k in taken:
-		hurt += float(taken[k])
-	var order := ["hp", "dmg", "speed", "start", "magnet", "eye"]
-	if float(taken.get("meteor", 0.0)) + float(taken.get("throw", 0.0)) > 0.35:
-		order = ["speed", "hp", "eye", "dmg", "start", "magnet"]
+	var order := ["hp", "dmg", "speed", "armor", "start", "magnet", "regen", "xp", "dodge", "eye", "luck"]
+	if float(taken.get("meteor", 0.0)) + float(taken.get("throw", 0.0)) + float(taken.get("paw", 0.0)) > 0.35:
+		order = ["speed", "dodge", "hp", "armor", "eye", "dmg", "start", "regen", "magnet", "xp", "luck"]
 	elif float(taken.get("boss", 0.0)) > 0.25:
-		order = ["dmg", "hp", "start", "speed", "magnet", "eye"]
+		order = ["dmg", "hp", "start", "luck", "speed", "armor", "xp", "regen", "magnet", "eye", "dodge"]
 	var guard := 0
-	while guard < 20:
+	while guard < 40:
 		guard += 1
+		var stage := parrot_stage(meta)
+		# новое умение за просо — первым делом, как только хватает
 		var any := false
+		for sk in PARROT_SKILLS:
+			if int(sk["cost"]) > 0 and int(sk["stage"]) <= stage and not p["skills"].has(sk["key"]) and int(p["bank"]) >= int(sk["cost"]):
+				p["bank"] = int(p["bank"]) - int(sk["cost"])
+				p["spent"] = int(p.get("spent", 0)) + int(sk["cost"])
+				p["skills"].append(sk["key"])
+				bought.append("умение «%s»" % sk["name"])
+				any = true
 		for k in order:
+			if any:
+				break
 			var item: Dictionary = {}
 			for it in PARROT:
 				if it["key"] == k:
 					item = it
+			if int(item["stage"]) > stage:
+				continue
 			var lvl := int(ups.get(k, 0))
 			if lvl >= int(item["max"]):
 				continue
 			var cost := up_cost(item, lvl)
 			if int(p["bank"]) >= cost:
 				p["bank"] = int(p["bank"]) - cost
+				p["spent"] = int(p.get("spent", 0)) + cost
 				ups[k] = lvl + 1
 				bought.append("%s ур. %d" % [item["name"], lvl + 1])
 				any = true

@@ -3,7 +3,7 @@ extends RefCounted
 ## Умения и пассивки попугая. На старте: не больше 3 умений, 3 общих пассивок
 ## и по одной особой пассивке на каждое взятое умение (из 5 вариантов).
 
-const SKILLS := ["feather", "bell", "mirror", "scream", "orbit"]
+const SKILLS := ["feather", "bell", "mirror", "scream", "orbit", "zap"]
 const GENERAL := ["wings", "fluff", "shell", "magnet", "beak", "luck"]
 const MAX_SKILLS := 3
 const MAX_GENERAL := 3
@@ -17,6 +17,7 @@ const MODS := {
 	"mirror": ["mirror_chain", "mirror_double", "mirror_burn", "mirror_long", "mirror_blind"],
 	"scream": ["scream_echo", "scream_stun", "scream_wide", "scream_fast", "scream_fear"],
 	"orbit": ["orbit_more", "orbit_fast", "orbit_wide", "orbit_knock", "orbit_fire"],
+	"zap": ["zap_chain", "zap_stun", "zap_fork", "zap_fast", "zap_long"],
 }
 
 const NAMES := {
@@ -26,6 +27,7 @@ const NAMES := {
 	"mirror": "Зеркальце",
 	"scream": "Крик",
 	"orbit": "Карусель",
+	"zap": "Искра",
 	"wings": "Лёгкие крылья",
 	"fluff": "Пух",
 	"shell": "Скорлупка",
@@ -57,6 +59,11 @@ const NAMES := {
 	"orbit_wide": "Широкий круг",
 	"orbit_knock": "Тяжёлые игрушки",
 	"orbit_fire": "Горячие игрушки",
+	"zap_chain": "Длинная цепь",
+	"zap_stun": "Удар током",
+	"zap_fork": "Развилка",
+	"zap_fast": "Наэлектризованный пух",
+	"zap_long": "Дальний разряд",
 }
 
 const DESC := {
@@ -66,6 +73,7 @@ const DESC := {
 	"mirror": "солнечный луч насквозь",
 	"scream": "волна крика по кругу",
 	"orbit": "игрушки кружат вокруг",
+	"zap": "статическая искра скачет по врагам",
 	"wings": "+12% скорости",
 	"fluff": "+20 здоровья",
 	"shell": "−1 урон от ударов",
@@ -97,18 +105,23 @@ const DESC := {
 	"orbit_wide": "круг шире",
 	"orbit_knock": "сильно отбрасывают",
 	"orbit_fire": "поджигают врагов",
+	"zap_chain": "+3 прыжка искры",
+	"zap_stun": "оглушает на 0,3 с",
+	"zap_fork": "первая искра раздваивается",
+	"zap_fast": "откат −35%",
+	"zap_long": "прыжок на 50% дальше",
 }
 
 ## База: сила карты по таблице тиров (1–10).
 const TIER := {
-	"feather": 6.0, "bell": 6.0, "mirror": 5.5, "scream": 5.0, "orbit": 5.5,
+	"feather": 6.0, "bell": 6.0, "mirror": 5.5, "scream": 5.0, "orbit": 5.5, "zap": 5.5,
 	"wings": 4.0, "fluff": 4.0, "shell": 4.0, "magnet": 3.0, "beak": 4.5, "luck": 3.5,
 }
 
 ## Ответ на игрока: от чего получал урон → что начинает ценить.
 const RESPONSE := {
 	"meteor": ["wings", "shell", "luck"],
-	"swarm": ["bell", "scream", "orbit", "bell_push", "scream_fear", "orbit_knock"],
+	"swarm": ["bell", "scream", "orbit", "zap", "bell_push", "scream_fear", "orbit_knock", "zap_chain"],
 	"tank": ["mirror", "feather", "beak", "mirror_burn", "feather_pierce"],
 	"shooter": ["feather", "fluff", "feather_homing"],
 	"trick": ["magnet", "luck", "shell"],
@@ -120,7 +133,7 @@ const RESPONSE_TEXT := {
 	"shooter": "меня обстреливают",
 	"trick": "меня обманывают",
 }
-const AREA := ["bell", "scream", "orbit"]
+const AREA := ["bell", "scream", "orbit", "zap"]
 
 ## Фрукты и овощи: награды за ивенты, герой съедает их сам по ситуации.
 const FRUITS := ["apple", "chili", "carrot", "grape", "lemon"]

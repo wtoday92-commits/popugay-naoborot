@@ -23,6 +23,18 @@ var meta_up := {}
 var learned_picks := {}
 var learned_wins := {}
 var learned_plans: Array = []
+## Умения, открытые Кеше в мете (остальные он ещё не знает).
+var pool: Array = ["feather", "bell", "orbit"]
+## Состояния от инструментов игрока: замедление, горение/рана, метки.
+var slow_t := 0.0
+var slow_k := 0.0
+var dots: Array = []
+var dot_acc := 0.0
+var mark_t := 0.0
+var horde_mark_t := 0.0
+var horde_mark_k := 0.3
+var rot_left := 0
+var _xp_frac := 0.0
 
 var game
 var pos := Vector2.ZERO
@@ -160,8 +172,8 @@ func _choose_plan() -> String:
 	var bs := -INF
 	# иногда пробует что-то наугад: исследование важнее привычки
 	if randf() < 0.25:
-		return Skills.SKILLS[randi() % Skills.SKILLS.size()]
-	for k in Skills.SKILLS:
+		return pool[randi() % pool.size()]
+	for k in pool:
 		# усталость от одного и того же: каждый повтор среди трёх последних планов — минус
 		var recent := 0
 		for pl in learned_plans.slice(maxi(0, learned_plans.size() - 3)):
@@ -232,18 +244,68 @@ func max_hp() -> float:
 
 
 func speed() -> float:
-	return 3.0 * M * (1.0 + 0.05 * int(meta_up.get("speed", 0)) + 0.1 * lvl_of("wings")) * (1.5 if speed_t > 0.0 else 1.0)
+	return 3.0 * M * (1.0 + 0.05 * int(meta_up.get("speed", 0)) + 0.1 * lvl_of("wings")) * (1.5 if speed_t > 0.0 else 1.0) * (1.0 - slow_k if slow_t > 0.0 else 1.0)
 
 
 func dmg_mult() -> float:
 	var m := 1.08 + 0.1 * int(meta_up.get("dmg", 0)) + 0.1 * lvl_of("beak")
-	if randf() < 0.08 * lvl_of("luck"):
+	if randf() < 0.08 * lvl_of("luck") + 0.03 * int(meta_up.get("luck", 0)):
 		m *= 2.0
 	return m
 
 
 func armor() -> float:
 	return float(lvl_of("shell"))
+
+
+## Опыт с учётом «Прилежания»; дробная часть копится.
+func gain_xp(n: int) -> void:
+	var f := float(n) * (1.0 + 0.06 * int(meta_up.get("xp", 0))) + _xp_frac
+	xp += int(f)
+	_xp_frac = f - floorf(f)
+
+
+func dodge_bonus() -> float:
+	return 0.05 * int(meta_up.get("dodge", 0))
+
+
+## Замедление: берётся сильнейшее из действующих.
+func slow(t: float, k: float) -> void:
+	if t <= 0.0:
+		return
+	slow_k = maxf(slow_k if slow_t > 0.0 else 0.0, k)
+	slow_t = maxf(slow_t, t)
+
+
+## Урон со временем (поджог, рана, вонь): тикает раз в полсекунды.
+func add_dot(dps: float, t: float, label: String) -> void:
+	if dps <= 0.0 or t <= 0.0:
+		return
+	for d in dots:
+		if d["label"] == label:
+			d["dps"] = maxf(float(d["dps"]), dps)
+			d["t"] = maxf(float(d["t"]), t)
+			return
+	dots.append({"dps": dps, "t": t, "label": label})
+
+
+func _update_dots(delta: float) -> void:
+	slow_t = maxf(0.0, slow_t - delta)
+	mark_t = maxf(0.0, mark_t - delta)
+	horde_mark_t = maxf(0.0, horde_mark_t - delta)
+	if dots.is_empty():
+		return
+	dot_acc += delta
+	if dot_acc < 0.5:
+		return
+	var step := dot_acc
+	dot_acc = 0.0
+	for d in dots:
+		var dt := minf(step, float(d["t"]))
+		d["t"] = float(d["t"]) - step
+		if dt > 0.0:
+			take_damage(float(d["dps"]) * dt, "dot", String(d["label"]), true)
+	dots = dots.filter(func(d): return float(d["t"]) > 0.0)
 
 
 func magnet() -> float:
@@ -269,6 +331,8 @@ func weapon_range() -> float:
 		return 4.5 * M
 	if skills.has("bell") or skills.has("orbit"):
 		return 1.5 * M
+	if skills.has("zap"):
+		return 2.6 * M
 	return 1.6 * M
 
 
@@ -316,7 +380,8 @@ func update(delta: float) -> void:
 	speed_t = maxf(0.0, speed_t - delta)
 	fruit_cd = maxf(0.0, fruit_cd - delta)
 	eat_t = maxf(0.0, eat_t - delta)
-	hp = minf(max_hp(), hp + 0.5 * delta)
+	hp = minf(max_hp(), hp + (0.5 + 0.25 * int(meta_up.get("regen", 0))) * delta)
+	_update_dots(delta)
 	for k in wariness:
 		wariness[k] = maxf(0.0, float(wariness[k]) - 0.01 * delta)
 	waltz_t -= delta
@@ -465,9 +530,12 @@ func _notice_meteors() -> void:
 		var p: Vector2 = m["pos"]
 		var ft: float = m["focus_t"]
 		var ok := false
-		if ft >= 0.0 and t >= ft + 0.3:
+		var late: float = m.get("hide", 0.0)
+		if t < float(m["born"]) + float(m.get("hidden", 0.0)):
+			continue
+		if ft >= 0.0 and t >= ft + 0.3 + late:
 			ok = true
-		elif t >= float(m["born"]) + 0.7 and pos.distance_to(p) < view_radius():
+		elif t >= float(m["born"]) + 0.7 + late and pos.distance_to(p) < view_radius():
 			ok = true
 		if ok:
 			m["notice_t"] = t
@@ -1150,6 +1218,13 @@ func _weapons(delta: float) -> void:
 				if has_mod("mirror_double"):
 					_beam(pos, -dir, dmg)
 				cds[k] = 2.4 - 0.25 * lvl
+			"zap":
+				var ts: Array = game.enemies_near(pos, 3.2 * M, 1)
+				if ts.is_empty():
+					cds[k] = 0.2
+					continue
+				_zap(ts[0], lvl)
+				cds[k] = (1.7 - 0.15 * lvl) * (0.65 if has_mod("zap_fast") else 1.0)
 			"scream":
 				var rr := (2.4 + 0.4 * lvl) * M * (1.35 if has_mod("scream_wide") else 1.0)
 				var ts: Array = game.enemies_near(pos, rr, 999)
@@ -1192,6 +1267,42 @@ func _beam(from: Vector2, dir: Vector2, dmg: float) -> void:
 			hit.append(picked)
 			cur = picked
 	game.sfx("chime", -16.0, 2.0)
+
+
+## Искра: статический разряд с пуха прыгает от врага к врагу, каждый следующий — чуть слабее.
+func _zap(first: Enemy, lvl: int) -> void:
+	var hops := 3 + int(lvl / 2) + (3 if has_mod("zap_chain") else 0)
+	var reach := 2.6 * M * (1.5 if has_mod("zap_long") else 1.0)
+	var dmg := (7.0 + 3.5 * lvl) * dmg_mult()
+	var starts: Array = [first]
+	if has_mod("zap_fork"):
+		var ex: Array = game.enemies_near(pos, 3.2 * M, 3)
+		for e in ex:
+			if e != first:
+				starts.append(e)
+				break
+	var hit: Array = []
+	for st in starts:
+		var pts := PackedVector2Array([pos])
+		var cur: Enemy = st
+		var d := dmg
+		for j in hops:
+			if cur == null:
+				break
+			hit.append(cur)
+			pts.append(cur.pos)
+			game.damage_enemy(cur, d, Vector2.ZERO, true, "zap")
+			if has_mod("zap_stun"):
+				cur.stun = maxf(cur.stun, 0.3)
+			d *= 0.85
+			var nxt: Enemy = null
+			for c in game.enemies_near(cur.pos, reach, 6):
+				if not hit.has(c):
+					nxt = c
+					break
+			cur = nxt
+		game.add_fx({"kind": "zap", "pos": pos, "pts": pts, "dur": 0.22})
+	game.sfx("chime", -14.0, 2.6)
 
 
 func scream_at(rr: float, dmg: float) -> void:
@@ -1277,7 +1388,13 @@ func take_damage(amount: float, src: String, label: String, from_player: bool) -
 		shield_hits -= 1
 		game.add_text(pos + Vector2(0, -50), "щит!", Color("c9b52a"), 18)
 		return
-	var a := amount if src == "meteor" or src == "rotten" else maxf(1.0, amount - armor())
+	var a := amount if src == "meteor" or src == "rotten" or src == "dot" else maxf(1.0, amount - armor())
+	a *= 1.0 - 0.04 * int(meta_up.get("armor", 0))
+	var mine := from_player or ["meteor", "paw", "throw", "missile", "rotten", "trap", "dot"].has(src)
+	if mine and mark_t > 0.0:
+		a *= 1.25
+	elif not mine and horde_mark_t > 0.0:
+		a *= 1.0 + horde_mark_k
 	if has_mod("bell_armor") and horde_count >= 3 and nearest_d < 2.2 * M:
 		a *= 0.7
 	hp -= a
@@ -1316,7 +1433,7 @@ func try_dodge_throw(id: int, v: Vector2) -> bool:
 	if not focus_ids.has(id) or stun > 0.0 or held > 0.0 or trapped > 0.0:
 		return false
 	# в панике летящий носок легко прозевать
-	var chance := clampf(0.75 - 0.9 * stress + float(wariness["throw"]) + 0.2 * learned_alert("throw"), 0.05, 0.85)
+	var chance := clampf(0.75 - 0.9 * stress + float(wariness["throw"]) + 0.2 * learned_alert("throw") + dodge_bonus() - game.pk("throw_sneak"), 0.05, 0.85)
 	if randf() > chance:
 		return false
 	var dir := v.normalized()
@@ -1409,8 +1526,10 @@ func score_card(card: Dictionary) -> Dictionary:
 
 
 ## Прокачка из меты и квесты на забег.
-func apply_meta(ups: Dictionary, qs: Array) -> void:
+func apply_meta(ups: Dictionary, qs: Array, skill_pool: Array = []) -> void:
 	meta_up = ups
+	if skill_pool.size() > 0:
+		pool = skill_pool.duplicate()
 	quests = qs.duplicate()
 	slots = 3 + int(ups.get("eye", 0))
 	hp = max_hp()

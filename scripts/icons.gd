@@ -11,6 +11,7 @@ const BADGE := {
 	"mirror_chain": "zigzag", "mirror_double": "double", "mirror_burn": "flame", "mirror_long": "arrow", "mirror_blind": "star",
 	"scream_echo": "double", "scream_stun": "star", "scream_wide": "out", "scream_fast": "clock", "scream_fear": "bang",
 	"orbit_more": "plus", "orbit_fast": "clock", "orbit_wide": "out", "orbit_knock": "out", "orbit_fire": "flame",
+	"zap_chain": "zigzag", "zap_stun": "star", "zap_fork": "fan", "zap_fast": "clock", "zap_long": "long",
 }
 
 const BG := {
@@ -103,6 +104,10 @@ static func _glyph(ci: CanvasItem, key: String, c: Vector2, u: float, a: float) 
 			for k in 3:
 				var ang := TAU * k / 3.0 + 0.4
 				_blob(ci, c + Vector2(cos(ang), sin(ang)) * 13 * u, 5 * u, 5 * u, cols[k], a, w * 0.7)
+		"zap":
+			_poly(ci, _pts(c, u, [Vector2(3, -16), Vector2(-9, 2), Vector2(-1, 2), Vector2(-5, 16), Vector2(9, -3), Vector2(1, -3)]), Color("f7d84a"), a, w)
+			ci.draw_arc(c, 15 * u, -2.4, -1.6, 6, Color("8fb6e8", a), w * 0.7)
+			ci.draw_arc(c, 15 * u, 0.7, 1.5, 6, Color("8fb6e8", a), w * 0.7)
 		"wings":
 			for k in 3:
 				_blob(ci, c + Vector2(-6 + k * 6, -2 + k * 4) * u, 10 * u, 5 * u, Color("58a04c").lightened(k * 0.15), a, w * 0.8, -0.5)
@@ -128,11 +133,19 @@ static func _glyph(ci: CanvasItem, key: String, c: Vector2, u: float, a: float) 
 			_poly(ci, _pts(c, u, [Vector2(-14, -10), Vector2(12, -14), Vector2(15, 9), Vector2(-11, 13)]), Color("c25b4a"), a, w)
 			ci.draw_line(c + Vector2(-10, 9) * u, c + Vector2(12, 5) * u, Color("f0d27a", a), w)
 		"basket":
-			_poly(ci, _pts(c, u, [Vector2(-15, -4), Vector2(15, -4), Vector2(11, 13), Vector2(-11, 13)]), Color("d9b98a"), a, w)
-			for k in 4:
-				ci.draw_line(c + Vector2(-9 + k * 6, -3) * u, c + Vector2(-7 + k * 5, 12) * u, Color("9a7a52", a), w * 0.6)
-			_blob(ci, c + Vector2(-5, -8) * u, 6 * u, 4 * u, Color("f1eee8"), a, w * 0.7)
-			_blob(ci, c + Vector2(6, -8) * u, 6 * u, 4 * u, Color("a9c3dd"), a, w * 0.7)
+			# птичья клетка-купол
+			var gold := Color("d9ae4f", a)
+			_blob(ci, c + Vector2(0, 13) * u, 15 * u, 4 * u, Color("8a5a32"), a, w * 0.8)
+			for k in 5:
+				var x := -12.0 + k * 6.0
+				var pts := PackedVector2Array()
+				for j in 7:
+					var t := float(j) / 6.0
+					pts.append(c + Vector2(x * sqrt(maxf(0.0, 1.0 - t * t * 0.95)), 12.0 - 24.0 * t) * u)
+				ci.draw_polyline(pts, ink, w * 1.1, true)
+				ci.draw_polyline(pts, gold, w * 0.5, true)
+			ci.draw_line(c + Vector2(-11, 1) * u, c + Vector2(11, 1) * u, ink, w * 0.9)
+			ci.draw_arc(c + Vector2(0, -15) * u, 3.5 * u, 0, TAU, 10, ink, w * 0.8)
 		"paw", "ram", "grab":
 			var pf := Color("fffaf2")
 			for k in 4:

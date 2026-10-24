@@ -20,6 +20,7 @@ const METEOR_CD := 12.0
 const BASKET_DELAY := 2.0
 const BASKET_R := 1.4 * M
 const BASKET_TRAP := 2.0
+const BASKET_FOLLOW := 75.0
 const METEOR_DELAY := 1.2
 const METEOR_R := 2.5 * M
 const WAVE_UNLOCK := 180.0
@@ -28,7 +29,7 @@ const HOLD_TIME := 2.5
 const HELD_SPEED := 230.0
 const INTRO_TIME := 2.8
 const WAVE_CD := 25.0
-const RAM_UNLOCK := 0.0
+const RAM_UNLOCK := 20.0
 const RAM_SPEED := 1500.0
 const MILLET_CD := 30.0
 const PAW_PUSH_R := 1.5 * M
@@ -102,6 +103,7 @@ var pending: Array = []
 var horde_level := 1
 var next_horde := HORDE_STEP
 var spawn_acc := 0.0
+var next_pack_swarm := 0.0
 var next_swarm := 30.0
 var next_hand := 30.0
 var double_spawn_until := -1.0
@@ -135,6 +137,8 @@ var prog := false
 var _bot_ram := 0.0
 var die_at := -1.0
 var shot_block := false
+var shot_cage := false
+var shot_waves := false
 var win_at := -1.0
 var paw := {"id": 0, "pos": Vector2(960, 700), "born": 0.0}
 var paw_vel := Vector2.ZERO
@@ -192,6 +196,16 @@ var player_by_tool := {}
 var selftest := false
 var full_bot := false
 var _bot_throw := 0.0
+## Статы деревьев штаба для усиленных умений этого забега.
+var perks := {}
+var twin_ready := true
+var twin_refill := false
+var combo_flip := false
+var run_pstats := {}
+var hero_dodges := 0
+## Отладка штаба: `--enh=throw,ram` покупает все узлы и усиливает эти деревья, `--waves=socks,calm,...` — составы.
+var hq_test: Array = []
+var waves_test: Array = []
 var _st_done := {}
 
 
@@ -214,10 +228,18 @@ func _ready() -> void:
 			shot_at = float(a.substr(7))
 		if a == "--shotblock":
 			shot_block = true
+		if a == "--shotcage":
+			shot_cage = true
+		if a == "--shotwaves":
+			shot_waves = true
 		if a.begins_with("--die="):
 			die_at = float(a.substr(6))
 		if a.begins_with("--win="):
 			win_at = float(a.substr(6))
+		if a.begins_with("--enh="):
+			hq_test = a.substr(6).split(",")
+		if a.begins_with("--waves="):
+			waves_test = a.substr(8).split(",")
 	if sim:
 		Save.path = "user://save_sim.json"
 	for a in args:
@@ -265,6 +287,7 @@ func start_run() -> void:
 	next_horde = HORDE_STEP
 	spawn_acc = 0.0
 	next_swarm = 30.0
+	next_pack_swarm = 0.0
 	next_hand = 30.0
 	double_spawn_until = -1.0
 	meteor_cd = 2.0
@@ -306,6 +329,36 @@ func start_run() -> void:
 	if unlock_all:
 		for it in Meta.PLAYER:
 			meta["unlocked"][it["key"]] = true
+	# старая прокачка рогатки переехала в дерево штаба: перья возвращаются
+	if meta.has("sling"):
+		var refund := 0
+		for k in meta["sling"].get("owned", {}):
+			refund += {"power1": 4, "power2": 6, "fire": 5, "knock": 5}.get(k, 0)
+		save["feathers"] = int(save.get("feathers", 0)) + refund
+		meta.erase("sling")
+	if hq_test.size() > 0:
+		for it in Meta.PLAYER:
+			meta["unlocked"][it["key"]] = true
+		var hh := Trees.hq(meta)
+		for ab in Trees.ABIL:
+			for bi in 3:
+				for ni in 7:
+					hh["nodes"][Trees.node_id(ab, bi, ni)] = int(Trees.node(ab, bi, ni)[4])
+		hh["enh"] = hq_test.duplicate()
+	if waves_test.size() > 0:
+		var hh := Trees.hq(meta)
+		for pkk in Trees.PACKS:
+			hh["packs"][pkk["key"]] = true
+		for i in mini(waves_test.size(), Trees.SEGMENTS):
+			hh["waves"][i] = waves_test[i]
+		for ab in Trees.ABIL:
+			hh["nodes"][Trees.node_id(ab, 0, 0)] = 3
+		perks = Trees.perks(meta)
+	twin_ready = true
+	twin_refill = false
+	combo_flip = false
+	run_pstats = {}
+	hero_dodges = 0
 	_generate_room()
 	queue.clear()
 	events_total = 2 + (1 if Meta.unlocked(meta, "event3") else 0) + (1 if Meta.unlocked(meta, "event4") else 0)
@@ -320,7 +373,7 @@ func start_run() -> void:
 	meta_t = 0.0
 	paw["id"] = new_id()
 	hero = Hero.new(self)
-	hero.apply_meta(meta["parrot"]["up"], meta.get("quests", []))
+	hero.apply_meta(meta["parrot"]["up"], meta.get("quests", []), Meta.parrot_skills(meta))
 	hero.pos = floor_rect.get_center()
 	if hud != null:
 		hud.reset()
@@ -369,7 +422,12 @@ func _process(delta: float) -> void:
 	if not sim:
 		world.queue_redraw()
 		hud.queue_redraw()
-	if shot_at > 0.0 and time > shot_at - 0.8 and meteor_cd <= 0.0 and ability_unlocked("book"):
+	if shot_cage and shot_at > 0.0 and time > shot_at - 2.4 and wave_cd <= 0.0 and ability_unlocked("basket"):
+		paw["pos"] = hero.pos
+		cast_wave()
+	if shot_waves and hud != null:
+		hud.hq_tab = "waves"
+	if not shot_cage and shot_at > 0.0 and time > shot_at - 0.8 and meteor_cd <= 0.0 and ability_unlocked("book"):
 		paw["pos"] = hero.pos + Vector2(60, 20)
 		cast_meteor()
 	if die_at > 0.0 and time >= die_at and over == "":
@@ -414,6 +472,10 @@ func _step(delta: float) -> void:
 	millet_cd = maxf(0.0, millet_cd - delta)
 	throw_cd = maxf(0.0, throw_cd - delta)
 	combo_cd = maxf(0.0, combo_cd - delta)
+	if throw_cd <= 0.0 and twin_refill:
+		twin_ready = true
+		twin_refill = false
+	_check_unlocks()
 	_director(delta)
 	_update_events(delta)
 	_update_paw_threat()
@@ -447,14 +509,14 @@ func _step(delta: float) -> void:
 
 func _timed_hints() -> void:
 	var list := [
-		[0.5, "throw", "Рогатка: зажмите ЛКМ на носке, оттяните лапку назад и отпустите. Издалека носок разгорается и бьёт больнее."],
-		[12.0, "ram", "Таран: резко махните лапкой в попугая — он оглохнет на полсекунды."],
+		[0.5, "throw", "Рогатка: зажмите ЛКМ на носке, оттяните лапку назад и отпустите."],
+		[RAM_UNLOCK + 1.0, "ram", "Таран: резко махните лапкой в попугая — он оглохнет на полсекунды."],
 		[float(queue[0]["at"]) - 25.0 if queue.size() > 0 else 40.0, "queue", "Ивенты слева можно поменять местами, пока они не начались."],
 	]
 	if ability_unlocked("book"):
-		list.append([20.0, "book", "Q — уронить книгу с полки туда, где лапка."])
+		list.append([BOOK_UNLOCK + 1.0, "book", "Q — уронить книгу с полки туда, где лапка."])
 	if ability_unlocked("basket"):
-		list.append([30.0, "basket", "W — корзина-ловушка: тень растёт 2 с, потом корзина накрывает попугая."])
+		list.append([WAVE_UNLOCK + 1.0, "basket", "W — клетка: тень 2 с ползёт за лапкой, потом клетка накрывает попугая."])
 	for h in list:
 		if time >= float(h[0]) and not hints_shown.has(h[1]):
 			hints_shown[h[1]] = true
@@ -497,6 +559,9 @@ func _unhandled_input(event_in: InputEvent) -> void:
 func _mouse_button(mb: InputEventMouseButton) -> void:
 	var p: Vector2 = paw["pos"]
 	if mb.button_index == MOUSE_BUTTON_RIGHT:
+		if mb.pressed and not outro.is_empty() and bool(outro["done"]):
+			_meta_action(hud.meta_click(p, true))
+			return
 		if phase != "play":
 			return
 		if mb.pressed and (not menu.is_empty() or not aim.is_empty()):
@@ -514,13 +579,7 @@ func _mouse_button(mb: InputEventMouseButton) -> void:
 		return
 	if mb.pressed and not outro.is_empty():
 		if bool(outro["done"]):
-			var act: String = hud.meta_click(p)
-			if act == "new":
-				start_run()
-			elif act.begins_with("buy:"):
-				buy_unlock(act.substr(4))
-			elif act.begins_with("sling:"):
-				buy_sling(act.substr(6))
+			_meta_action(hud.meta_click(p, false))
 			return
 		_outro_click(p)
 		return
@@ -599,23 +658,78 @@ func _check_ram(a: Vector2, b: Vector2, v: Vector2) -> void:
 	if time < RAM_UNLOCK or paw_bruise > 0.0 or hero.ram_immune > 0.0 or not levelup.is_empty():
 		return
 	var spd := maxf(paw_vel.length(), v.length() * 0.7)
-	if spd < RAM_SPEED:
+	if spd < RAM_SPEED * (1.0 - pk("ram_easy")):
 		return
-	if seg_dist(hero.pos, a, b) > PAW_HIT_R + hero.radius:
+	if seg_dist(hero.pos, a, b) > PAW_HIT_R + pk("paw_wide") + hero.radius:
 		return
 	var dir := (b - a).normalized()
 	if dir == Vector2.ZERO:
 		dir = paw_vel.normalized()
 	# увернуться можно, только если лапка в одном из слотов внимания
-	if hero.focus_ids.has(int(paw["id"])) and randf() < 0.5:
+	if not has_pk("ghost") and hero.focus_ids.has(int(paw["id"])) and randf() < 0.5 + hero.dodge_bonus() - pk("ram_sneak"):
 		hero.dodge_paw(dir)
+		hero_dodges += 1
 		sfx("whoosh", -10.0, 1.6)
 		return
+	apply_ram(dir)
+
+
+## Попадание тараном: общее для мыши и бота, со всеми ветками дерева «Таран».
+func apply_ram(dir: Vector2) -> void:
+	var caught: bool = hero.trapped > 0.0 or hero.stun > 0.0
+	if hero.trapped > 0.0:
+		pstat_add("ram_trapped")
 	hero.rammed(dir)
+	hero.knock_vel *= 1.0 + pk("ram_knock")
+	hero.stun += pk("ram_stun")
+	var dmg := pk("ram_dmg")
+	if has_pk("wallslam"):
+		var wall := false
+		for k in 5:
+			var q := hero.pos + dir * (0.6 + 0.5 * k) * M
+			if is_blocked(q) or not floor_rect.grow(-hero.radius).has_point(q):
+				wall = true
+				break
+		if wall:
+			dmg += 10.0 + pk("wall_dmg")
+			hero.stun = maxf(hero.stun, 0.8)
+			shake = 9.0
+			add_text(hero.pos + Vector2(0, -74), "Об стену!", Color("b23a2e"), 24)
+	if has_pk("ghost") and caught:
+		dmg *= 2.0
+	if dmg > 0.0:
+		hero.take_damage(dmg, "paw", "Таран", true)
+	if has_pk("dizzy"):
+		hero.slow(2.0 + pk("dizzy_len"), 0.4)
+	if has_pk("ram_forget"):
+		hero.focus.clear()
+		hero.focus_ids.clear()
+		hero.stress = minf(1.0, hero.stress + pk("ram_forget"))
+	if has_pk("rush"):
+		for e in enemies_near(hero.pos, (2.0 + pk("rush")) * M, 30):
+			if not e.is_big():
+				e.rush = 1.5 + pk("rush_len")
+				e.rush_k = 1.6 + pk("rush_speed")
+	if has_pk("ram_mark"):
+		hero.horde_mark_t = 3.0 + pk("mark_len")
+		hero.horde_mark_k = 0.3 + pk("mark_horde")
+	if has_pk("swarm"):
+		for i in 6:
+			var q := hero.pos + Vector2.RIGHT.rotated(TAU * i / 6.0) * 1.8 * M
+			if not is_blocked(q):
+				spawn_enemy(Enemy.T.SOCK, resolve_circle(q, 10.0), true)
+		add_fx({"kind": "poof", "pos": hero.pos, "dur": 0.5, "col": Color("f1eee8"), "r": 40.0})
 	log_event("ИГРОК", "таран лапкой")
-	paw_bruise = PAW_BRUISE
+	# «Двойной удар»: каждый второй таран не ушибает лапку
+	if has_pk("combo") and not combo_flip:
+		combo_flip = true
+		paw_bruise = 0.0
+	else:
+		combo_flip = false
+		paw_bruise = maxf(1.0, PAW_BRUISE - pk("ram_bruise"))
 	rams += 1
-	shake = 5.0
+	pstat_add("rams")
+	shake = maxf(shake, 5.0)
 	_register_hit("paw")
 	sfx("ram")
 	add_text(hero.pos + Vector2(0, -50), "Таран!", Color("6a4fb3"), 26)
@@ -668,15 +782,15 @@ func _try_grab(p: Vector2) -> void:
 	if held_e != null or paw_bruise > 0.0 or over != "" or paused or not FIELD.has_point(p):
 		return
 	var best: Enemy = null
-	var bd := GRAB_R
-	for e in enemies_near(p, GRAB_R + 12.0, 6):
+	var bd := GRAB_R + pk("grab_r")
+	for e in enemies_near(p, bd + 12.0, 6):
 		if e.grabbable() and p.distance_to(e.pos) < bd + e.radius * 0.5:
 			best = e
 			bd = p.distance_to(e.pos)
 	if best == null:
 		return
 	held_e = best
-	hold_t = HOLD_TIME
+	hold_t = HOLD_TIME + pk("hold")
 	sling_anchor = best.pos
 	enemies.erase(best)
 	best.push_vel = Vector2.ZERO
@@ -705,7 +819,7 @@ func throw_vector() -> Vector2:
 		return Vector2.ZERO
 	var spd := sling_speed() * pull.length() / lim
 	if held_e.type == Enemy.T.SLIPPER:
-		spd *= 0.55
+		spd *= 0.55 * (1.0 + pk("slipper_fast"))
 	return -pull.normalized() * spd
 
 func _release_grab(v_override: Vector2 = Vector2.ZERO) -> void:
@@ -713,14 +827,27 @@ func _release_grab(v_override: Vector2 = Vector2.ZERO) -> void:
 		return
 	var v := v_override if v_override != Vector2.ZERO else throw_vector()
 	if v_override != Vector2.ZERO and held_e.type == Enemy.T.SLIPPER:
-		v *= 0.55
+		v *= 0.55 * (1.0 + pk("slipper_fast"))
 	if v.length() < 240.0:
 		_drop_held()
 		return
 	var e := held_e
 	held_e = null
-	throw_cd = THROW_CD
+	# «Двойная рогатка»: первый заряд — почти без отката
+	if has_pk("twin") and twin_ready:
+		twin_ready = false
+		throw_cd = 0.35
+	else:
+		throw_cd = throw_cd_full()
+		twin_refill = true
+	pstat_add("throws")
 	thrown.append({"id": new_id(), "pos": e.pos, "vel": v, "e": e, "born": time, "spin": 0.0, "dodged": false, "dist": 0.0, "fire": 0.0})
+	# «Носочный залп»: ещё два носка веером
+	if has_pk("volley") and e.type != Enemy.T.SLIPPER:
+		for a in [-0.2, 0.2]:
+			var ex := spawn_enemy(Enemy.T.SOCK, e.pos, true)
+			enemies.erase(ex)
+			thrown.append({"id": new_id(), "pos": e.pos, "vel": v.rotated(a), "e": ex, "born": time, "spin": 0.0, "dodged": false, "dist": 0.0, "fire": 0.0})
 	log_event("ИГРОК", "бросок: %s" % EDEFS[e.type]["name"])
 	sfx("throw", -4.0, randf_range(0.9, 1.2))
 
@@ -730,15 +857,46 @@ func _update_thrown(delta: float) -> void:
 		var e: Enemy = s["e"]
 		var slipper: bool = e.type == Enemy.T.SLIPPER
 		var v: Vector2 = s["vel"]
+		if s.has("return"):
+			# «Тапок-бумеранг»: летит обратно в лапку и сразу готов к новому броску
+			var to: Vector2 = paw["pos"]
+			s["pos"] = Vector2(s["pos"]).move_toward(to, 1100.0 * delta)
+			s["spin"] = float(s["spin"]) + delta * 14.0
+			if Vector2(s["pos"]).distance_to(to) < 24.0 or time - float(s["return"]) > 2.0:
+				s["done"] = true
+				if held_e == null and over == "" and FIELD.has_point(to):
+					held_e = e
+					e.pos = to
+					sling_anchor = to
+					hold_t = HOLD_TIME + pk("hold")
+					throw_cd = 0.0
+					sfx("grab", -4.0, 1.3)
+				else:
+					e.pos = resolve_circle(to.clamp(floor_rect.position, floor_rect.end), e.radius)
+					enemies.append(e)
+			continue
 		var p: Vector2 = s["pos"] + v * delta
 		s["dist"] = float(s["dist"]) + v.length() * delta
-		# ветка «Огненный носок»: носок разгорается в полёте, чем дальше — тем больнее
-		if not slipper and sling_branch() == "fire":
+		# «Огненный носок»: носок разгорается в полёте, чем дальше — тем больнее
+		if not slipper and has_pk("fire"):
 			s["fire"] = clampf(float(s["dist"]) / (9.0 * M), 0.0, 1.0)
 		s["spin"] = float(s["spin"]) + delta * (10.0 if slipper else 18.0)
 		v *= exp(-(0.9 if slipper else 0.45) * delta)
 		var land := false
-		if is_blocked(p):
+		if is_blocked(p) and has_pk("ricochet") and not s.has("bounced"):
+			# «Рикошет»: отражаемся по одной оси и летим дальше
+			var op: Vector2 = s["pos"]
+			if not is_blocked(Vector2(op.x - v.x * delta, p.y)):
+				v.x = -v.x
+			elif not is_blocked(Vector2(p.x, op.y - v.y * delta)):
+				v.y = -v.y
+			else:
+				v = -v
+			s["bounced"] = true
+			p = op
+			sfx("bounce", -6.0, 1.6)
+			add_fx({"kind": "ring", "pos": p, "r": 16.0, "dur": 0.2, "color": Color(0.42, 0.31, 0.7, 0.9)})
+		elif is_blocked(p):
 			land = true
 			p = resolve_circle(p, e.radius)
 			v = -v * 0.3
@@ -746,23 +904,51 @@ func _update_thrown(delta: float) -> void:
 		elif not s["dodged"] and p.distance_to(hero.pos) < hero.radius + e.radius + 40.0 and hero.try_dodge_throw(int(s["id"]), v):
 			# заметил летящий предмет — отпрыгнул
 			s["dodged"] = true
+			hero_dodges += 1
 		elif p.distance_to(hero.pos) < hero.radius + e.radius + 4.0:
 			hero.wariness["throw"] = minf(0.6, float(hero.wariness["throw"]) + 0.15)
 			var dist_m: float = float(s["dist"]) / M
 			var nm := String(EDEFS[e.type]["name"]).to_lower()
 			var label := ("Огненный " if float(s["fire"]) > 0.6 else "Брошенный ") + nm
+			var st := pk("throw_stun")
 			if slipper:
-				hero.take_damage(6.0, "throw", label, true)
-				# ветка «Тапок-выбивала»: выбивает фрукты, издалека — два
-				if sling_branch() == "knock":
-					_knock_fruits(2 if dist_m > 9.0 else 1, v.normalized())
-				hero.knocked(v.normalized(), 260.0, 0.3)
-			elif sling_branch() == "fire":
-				hero.take_damage(2.0 + 1.0 * dist_m, "throw", label, true)
-				hero.knocked(v.normalized(), 180.0, 0.15)
+				pstat_add("slipper_hits")
+				hero.take_damage(6.0 * (1.0 + pk("slipper_dmg")), "throw", label, true)
+				# «Тапок-выбивала»: выбивает фрукты, издалека — два
+				if has_pk("knock"):
+					var n := 2 if dist_m > 9.0 else 1
+					if randf() < pk("knock_more"):
+						n += 1
+					_knock_fruits(n, v.normalized())
+				if has_pk("slipper_mark"):
+					hero.mark_t = maxf(hero.mark_t, pk("slipper_mark"))
+				hero.knocked(v.normalized(), 260.0, 0.3 + pk("slipper_stun") + st)
+				if has_pk("boomerang"):
+					s["return"] = time
+					s["pos"] = p
+					s["vel"] = Vector2.ZERO
+					throws_hit += 1
+					sfx("hit", 0.0, 1.3)
+					continue
+			elif has_pk("fire"):
+				pstat_add("sock_hits")
+				var dm := (2.0 + 1.0 * dist_m) * (1.0 + pk("sock_dmg"))
+				if float(s["fire"]) > 0.6:
+					pstat_add("fire_hits")
+					dm *= 1.0 + pk("fire_dmg")
+					if has_pk("burn"):
+						hero.add_dot(pk("burn"), 3.0, "Поджог")
+				hero.take_damage(dm, "throw", label, true)
+				hero.knocked(v.normalized(), 180.0, 0.15 + st)
 			else:
-				hero.take_damage(3.0 + 0.3 * dist_m, "throw", label, true)
-				hero.knocked(v.normalized(), 140.0, 0.1)
+				pstat_add("sock_hits")
+				hero.take_damage((3.0 + 0.3 * dist_m) * (1.0 + pk("sock_dmg")), "throw", label, true)
+				hero.knocked(v.normalized(), 140.0, 0.1 + st)
+			if has_pk("throw_xp"):
+				var lost := mini(hero.xp, int(pk("throw_xp")))
+				if lost > 0:
+					hero.xp -= lost
+					add_text(hero.pos + Vector2(0, -78), "−%d опыта" % lost, Color("6a4fb3"), 18)
 			if float(s["fire"]) > 0.6:
 					add_fx({"kind": "fire", "pos": hero.pos, "r": 50.0, "dur": 0.4})
 			throws_hit += 1
@@ -790,6 +976,7 @@ func _knock_fruits(n: int, dir: Vector2) -> void:
 			break
 		var f: String = hero.fruits[randi() % hero.fruits.size()]
 		hero.fruits.erase(f)
+		pstat_add("fruits_knocked")
 		var to := resolve_circle(hero.pos + dir.rotated(randf_range(-0.8, 0.8)) * randf_range(2.5, 4.5) * M, 12.0)
 		fruit_drops.append({"id": new_id(), "pos": hero.pos, "to": to, "fruit": f, "born": time, "life": 12.0, "taken": false, "t": 0.0})
 		add_text(hero.pos + Vector2(0, -60 - i * 20), "выбит фрукт!", Color("6a4fb3"), 20)
@@ -831,11 +1018,29 @@ func _menu_click(p: Vector2) -> void:
 			else:
 				g["mod"] = kind
 				log_event("ИГРОК", "подмена проса: %s" % MENU_NAMES[kind])
-				millet_cd = MILLET_CD
+				millet_cd = millet_cd_full()
+				pstat_add("swaps")
 				_finish_tut("millet")
 				add_fx({"kind": "sparkle", "pos": g["pos"], "dur": 0.5})
 			return
 	menu = {}
+
+
+## «Капканная дорожка»: ещё два капкана в крупном просе рядом (или новые колоски-капканы).
+func _trap_path(at: Vector2) -> void:
+	var n := 0
+	for g in gems:
+		if n >= 2:
+			break
+		if g["big"] and not g["glow"] and not g.has("mod") and not g["taken"] and Vector2(g["pos"]).distance_to(at) < 6.0 * M:
+			g["mod"] = "trap"
+			n += 1
+	while n < 2:
+		var q := resolve_circle(at + Vector2.RIGHT.rotated(randf() * TAU) * randf_range(2.0, 3.5) * M, 10.0)
+		var g := _drop_gem(q.clamp(floor_rect.position + Vector2(20, 20), floor_rect.end - Vector2(20, 20)), true)
+		g["mod"] = "trap"
+		g["xp"] = 0
+		n += 1
 
 
 func _launch_missile(p: Vector2) -> void:
@@ -847,10 +1052,11 @@ func _launch_missile(p: Vector2) -> void:
 	var dir: Vector2 = (p - Vector2(g["pos"])).normalized()
 	if dir == Vector2.ZERO:
 		dir = Vector2.RIGHT
-	missiles.append({"id": new_id(), "pos": g["pos"], "vel": dir * 7.0 * M, "bounces": 5, "born": time, "life": 14.0})
+	missiles.append({"id": new_id(), "pos": g["pos"], "vel": dir * 7.0 * M * (1.0 + pk("missile_speed")), "bounces": 5 + int(pk("missile_bounce")), "born": time, "life": 14.0})
 	_finish_tut("millet")
 	log_event("ИГРОК", "просо-снаряд")
-	millet_cd = MILLET_CD
+	millet_cd = millet_cd_full()
+	pstat_add("swaps")
 	sfx("throw", 0.0, 0.8)
 
 
@@ -870,13 +1076,19 @@ func _update_missiles(delta: float) -> void:
 				v = -v
 			s["bounces"] = int(s["bounces"]) - 1
 			np = p + v * delta
+			# «Просяной град»: на первом отскоке снаряд делится на три
+			if has_pk("hail") and not s.has("split"):
+				s["split"] = true
+				for a in [-0.5, 0.5]:
+					missiles.append({"id": new_id(), "pos": p, "vel": v.rotated(a), "bounces": 2, "born": time, "life": 6.0, "split": true})
 			sfx("bounce", -6.0, randf_range(0.9, 1.2))
 			add_fx({"kind": "ring", "pos": p, "r": 18.0, "dur": 0.2, "color": Color(0.95, 0.75, 0.25, 0.9)})
 		s["pos"] = np
 		s["vel"] = v
 		if np.distance_to(hero.pos) < hero.radius + 12.0:
-			hero.take_damage(10.0, "missile", "Просо-снаряд", true)
-			hero.knocked(v.normalized(), 120.0, 0.5)
+			hero.take_damage(10.0 + pk("missile_dmg"), "missile", "Просо-снаряд", true)
+			hero.knocked(v.normalized(), 120.0, 0.5 + pk("missile_stun"))
+			pstat_add("missile_hits")
 			tricks += 1
 			s["life"] = 0.0
 			sfx("hit", 0.0, 0.9)
@@ -894,28 +1106,70 @@ func cast_meteor() -> void:
 	var p: Vector2 = paw["pos"]
 	if not sim and not FIELD.has_point(p):
 		return
-	meteor_cd = METEOR_CD
+	meteor_cd = book_cd_full()
 	meteors_cast += 1
+	pstat_add("book_casts")
 	log_event("ИГРОК", "книга (до героя %d м)" % int(p.distance_to(hero.pos) / M))
 	p = p.clamp(floor_rect.position, floor_rect.end)
-	meteors.append({"id": new_id(), "pos": p, "born": time, "t": 0.0, "delay": METEOR_DELAY, "r": METEOR_R,
-		"landed": false, "land_t": 0.0, "focus_t": -1.0, "notice_t": -1.0})
+	var pts: Array = [p]
+	if has_pk("book_rain"):
+		pts = []
+		for i in 3:
+			pts.append((p + Vector2(0, -1.5 * M).rotated(TAU * i / 3.0)).clamp(floor_rect.position, floor_rect.end))
+	for q in pts:
+		_add_book(q, METEOR_DELAY - pk("book_fast"))
+	if has_pk("book_fake"):
+		# ложная тень: с той стороны, куда Кеша побежит от настоящей
+		var away := (hero.pos - p).normalized()
+		if away == Vector2.ZERO:
+			away = Vector2.RIGHT
+		for i in 1 + int(pk("book_fake_n")):
+			var q: Vector2 = (hero.pos + away.rotated(randf_range(-0.7, 0.7)) * (METEOR_R + 0.8 * M)).clamp(floor_rect.position, floor_rect.end)
+			var fm := _add_book(q, METEOR_DELAY - pk("book_fast"))
+			fm["fake"] = true
+	if has_pk("book_second"):
+		delayed.append({"at": time + 1.0, "kind": "book2"})
 	sfx("whoosh", -4.0)
 
 
-## Корзина-ловушка: под лапкой 2 с растёт тень, потом сверху падает корзина и накрывает того, кто под ней.
+func _add_book(p: Vector2, delay: float) -> Dictionary:
+	var m := {"id": new_id(), "pos": p, "born": time, "t": 0.0, "delay": delay, "r": METEOR_R * (1.0 + pk("book_r")),
+		"landed": false, "land_t": 0.0, "focus_t": -1.0, "notice_t": -1.0, "hide": pk("book_hide")}
+	meteors.append(m)
+	return m
+
+
+## Клетка: под лапкой 2 с растёт тень и ползёт за ней, потом сверху падает клетка и накрывает того, кто под ней.
 func cast_wave() -> void:
 	if over != "" or paused or phase != "play" or not ability_unlocked("basket") or wave_cd > 0.0 or not levelup.is_empty():
 		return
 	var p: Vector2 = paw["pos"]
 	if not sim and not FIELD.has_point(p):
 		return
-	wave_cd = WAVE_CD
-	log_event("ИГРОК", "корзина-ловушка")
+	wave_cd = cage_cd_full()
+	pstat_add("baskets")
+	log_event("ИГРОК", "клетка")
 	p = p.clamp(floor_rect.position, floor_rect.end)
-	meteors.append({"id": new_id(), "pos": p, "born": time, "t": 0.0, "delay": BASKET_DELAY, "r": BASKET_R,
-		"landed": false, "land_t": 0.0, "focus_t": -1.0, "notice_t": -1.0, "basket": true})
+	var delay := maxf(1.0, BASKET_DELAY - pk("cage_fast"))
+	var m := {"id": new_id(), "pos": p, "born": time, "t": 0.0, "delay": delay, "r": BASKET_R * (1.0 + pk("cage_r")),
+		"landed": false, "land_t": 0.0, "focus_t": -1.0, "notice_t": -1.0, "basket": true, "hide": pk("cage_hide"),
+		"trap": cage_trap_time()}
+	if has_pk("hunter"):
+		m["hidden"] = delay - 0.6
+	meteors.append(m)
 	sfx("whoosh", -6.0, 0.6)
+
+
+## Клетка, пока падает, медленно ползёт за лапкой (в прогоне — за целью бота).
+func _cage_follow(m: Dictionary, delta: float) -> void:
+	var spd := BASKET_FOLLOW * (1.0 + pk("cage_follow")) * (2.0 if has_pk("hunter") else 1.0)
+	var to: Vector2 = paw["pos"]
+	if sim:
+		to = hero.pos + hero.vel * 0.3
+	to = to.clamp(floor_rect.position, floor_rect.end)
+	m["pos"] = Vector2(m["pos"]).move_toward(to, spd * delta)
+	if has_pk("cage_slow") and hero.pos.distance_to(m["pos"]) < float(m["r"]):
+		hero.slow(0.15, 0.3 + pk("cage_slow_more"))
 
 
 
@@ -955,6 +1209,33 @@ func _director(delta: float) -> void:
 	var w := _wave()
 	var minimum: int = w[1]
 	var interval: float = w[2]
+	var pack := Trees.wave_at(meta, time)
+	var slip_share := float(w[3])
+	var spray_share := float(w[4])
+	match pack:
+		"socks":
+			minimum = int(minimum * 1.15)
+			slip_share = 0.0
+			spray_share = 0.0
+		"slippers":
+			minimum = int(minimum * 0.75)
+			slip_share = 0.45
+		"spray":
+			spray_share = 0.33
+			slip_share *= 0.5
+		"calm":
+			minimum = int(minimum * 0.5)
+			interval *= 1.8
+		"yarn":
+			slip_share *= 0.5
+			if time >= next_pack_swarm:
+				next_pack_swarm = time + 10.0
+				var sp := edge_point(10.0 * M)
+				add_fx({"kind": "jingle", "pos": sp, "dur": 1.4})
+				pending.append({"at": time + 1.2, "type": Enemy.T.YARN, "n": 4 + horde_level, "pos": sp})
+	if time >= 30.0 and Trees.wave_at(meta, time - 30.0) == "calm" and pack != "calm":
+		minimum = int(minimum * 1.35)
+		interval *= 0.75
 	if time < double_spawn_until:
 		interval *= 0.5
 	if enraged:
@@ -970,9 +1251,9 @@ func _director(delta: float) -> void:
 			spawn_acc -= interval
 		var t: int = Enemy.T.SOCK
 		var r := randf()
-		if r < float(w[4]):
+		if r < spray_share:
 			t = Enemy.T.SPRAYER
-		elif r < float(w[4]) + float(w[3]):
+		elif r < spray_share + slip_share:
 			t = Enemy.T.SLIPPER
 		spawn_enemy(t, edge_point(9.0 * M))
 		alive += 1
@@ -1206,6 +1487,9 @@ func _update_enemies(delta: float) -> void:
 			spd = 0.0
 		if e.slow > 0.0:
 			spd *= 0.5
+		if e.rush > 0.0:
+			e.rush -= delta
+			spd = maxf(spd, e.speed) * e.rush_k
 		if spd > 0.0:
 			e.move_dir = dir
 		e.pos += (dir * spd + e.push_vel) * delta
@@ -1566,11 +1850,29 @@ func _update_meteors(delta: float) -> void:
 	for m in meteors:
 		if not m["landed"]:
 			m["t"] = float(m["t"]) + delta
+			if m.has("basket"):
+				_cage_follow(m, delta)
 			if float(m["t"]) >= float(m["delay"]):
 				_meteor_land(m)
 		else:
-			m["land_t"] = float(m["land_t"]) + delta
-	meteors = meteors.filter(func(m): return not m["landed"] or float(m["land_t"]) < (BASKET_TRAP + 0.3 if m.has("basket") else 0.9))
+			var was: float = m["land_t"]
+			m["land_t"] = was + delta
+			if m.has("caught"):
+				var tt: float = m["trap"]
+				if float(m["land_t"]) < tt:
+					hero.pos = m["pos"]
+					pstat_add("cage_time", delta)
+					if has_pk("cage_scatter"):
+						for g in gems:
+							var gd: Vector2 = Vector2(g["pos"]) - Vector2(m["pos"])
+							if not g["taken"] and gd.length() < 4.5 * M and gd.length() > 1.0:
+								g["pos"] = (Vector2(g["pos"]) + gd.normalized() * 140.0 * delta).clamp(floor_rect.position + Vector2(12, 12), floor_rect.end - Vector2(12, 12))
+				elif was < tt and has_pk("washer"):
+					# «Стиральная машина»: Кеша выходит, шатаясь, и роняет фрукт
+					hero.slow(3.0, 0.5)
+					_knock_fruits(1, Vector2.RIGHT.rotated(randf() * TAU))
+					hero.say("Голова кружится…")
+	meteors = meteors.filter(func(m): return not m["landed"] or float(m["land_t"]) < (float(m.get("trap", BASKET_TRAP)) + 0.3 if m.has("basket") else 0.9))
 
 
 func _meteor_land(m: Dictionary) -> void:
@@ -1579,44 +1881,84 @@ func _meteor_land(m: Dictionary) -> void:
 	if m.has("basket"):
 		_basket_land(m)
 		return
+	var p: Vector2 = m["pos"]
+	var r: float = m["r"]
+	if m.has("fake"):
+		add_fx({"kind": "poof", "pos": p, "dur": 0.4, "col": Color(0.9, 0.85, 0.78), "r": 16.0})
+		return
 	shake = 9.0
 	sfx("thud")
-	var p: Vector2 = m["pos"]
-	add_fx({"kind": "dust", "pos": p, "r": METEOR_R, "dur": 0.5})
-	if hero.pos.distance_to(p) <= METEOR_R + hero.radius * 0.5:
+	add_fx({"kind": "dust", "pos": p, "r": r, "dur": 0.5})
+	var hd := hero.pos.distance_to(p)
+	if hd <= 2.0 * M:
+		pstat_add("book_near")
+	if hd <= r + hero.radius * 0.5:
 		meteor_hits += 1
+		pstat_add("book_hits")
 		hero.wariness["meteor"] = float(hero.wariness["meteor"]) + 0.25
 		hero.say("Ай! Не заметил книгу." if float(m["notice_t"]) < 0.0 else "Не успел увернуться от книги!")
-		hero.take_damage(hero.max_hp() * 0.15, "meteor", "Книга с полки", true)
+		hero.take_damage(hero.max_hp() * (0.15 + pk("book_dmg")), "meteor", "Книга с полки", true)
+		if has_pk("book_stun"):
+			hero.stun = maxf(hero.stun, 1.0 + pk("book_stun_len"))
+		if has_pk("book_mark"):
+			hero.mark_t = maxf(hero.mark_t, pk("book_mark"))
 		sfx("squawk")
-	elif float(m["notice_t"]) >= 0.0 and hero.pos.distance_to(p) < METEOR_R + 2.0 * M:
+	elif float(m["notice_t"]) >= 0.0 and hd < r + 2.0 * M:
 		_sim_dodged += 1
-	for e in enemies_near(p, METEOR_R, 999):
+		hero_dodges += 1
+		pstat_add("book_dodged")
+	if has_pk("book_dust") and hd <= r + 1.0 * M:
+		hero.slow(pk("book_dust"), 0.3)
+	for e in enemies_near(p, r, 999):
 		if e.type == Enemy.T.BOSS:
 			damage_enemy(e, 60.0, Vector2.ZERO)
 			continue
-		e.stun = 1.0
-		e.push_vel += (e.pos - p).normalized() * 200.0 * e.push_factor
+		if not has_pk("book_soft"):
+			e.stun = 1.0
+			e.push_vel += (e.pos - p).normalized() * 200.0 * e.push_factor
+	if has_pk("book_pull"):
+		# «Сквозняк»: враги вокруг тянутся к месту удара — к Кеше, если он рядом
+		for e in enemies_near(p, r * 2.6, 999):
+			if not e.is_big():
+				e.push_vel += (p - e.pos).normalized() * 260.0 * (1.0 + pk("pull_more")) * e.push_factor
 
 
 func _basket_land(m: Dictionary) -> void:
 	shake = 6.0
 	sfx("thud", 0.0, 1.3)
 	var p: Vector2 = m["pos"]
-	if hero.pos.distance_to(p) <= BASKET_R:
+	var r: float = m["r"]
+	var tt: float = m["trap"]
+	if hero.pos.distance_to(p) <= r:
 		m["caught"] = true
-		hero.trapped = BASKET_TRAP
+		hero.trapped = tt
 		hero.pos = p
 		tricks += 1
+		pstat_add("caught")
 		_register_hit("trap")
-		hero.say("Меня накрыли корзиной!")
-		log_event("ИГРОК", "корзина накрыла попугая")
-		add_text(p + Vector2(0, -60), "Попался в корзину!", Color("6a4fb3"), 24)
+		hero.say("Меня поймали в клетку!")
+		log_event("ИГРОК", "клетка накрыла попугая")
+		add_text(p + Vector2(0, -60), "Попался в клетку!", Color("6a4fb3"), 24)
+		if has_pk("cage_shock"):
+			hero.add_dot(4.0 + pk("shock_dps"), tt, "Прутья под током")
+		if has_pk("cage_stress"):
+			hero.stress = minf(1.0, hero.stress + pk("cage_stress"))
+		for i in int(pk("cage_socks")):
+			var e := spawn_enemy(Enemy.T.SOCK, p + Vector2.RIGHT.rotated(TAU * i / 3.0) * 16.0, true)
+			e.atk_cd = 0.3
 	else:
-		hero.say("Мимо, корзинка.")
-	for e in enemies_near(p, BASKET_R, 999):
-		if not e.is_big():
-			e.stun = BASKET_TRAP
+		hero.say("Мимо, клетка.")
+	for e in enemies_near(p, r, 999):
+		if not e.is_big() and not e.from_player:
+			e.stun = tt
+	if has_pk("laundry"):
+		# «Бельевая лавина»: кольцо носков вокруг клетки
+		var n := 6 + int(pk("laundry_n"))
+		for i in n:
+			var q := p + Vector2.RIGHT.rotated(TAU * i / float(n)) * (r + 0.6 * M)
+			if not is_blocked(q) and floor_rect.has_point(q):
+				var e := spawn_enemy(Enemy.T.SOCK, resolve_circle(q, 10.0), true)
+				e.speed *= 1.0 + pk("laundry_fast")
 
 
 func _update_delayed() -> void:
@@ -1626,9 +1968,16 @@ func _update_delayed() -> void:
 		match d["kind"]:
 			"echo":
 				hero.scream_at(float(d["r"]), float(d["dmg"]))
+			"book2":
+				# «Второй том»: туда, куда бежит Кеша
+				var q: Vector2 = (hero.pos + hero.vel * 0.8).clamp(floor_rect.position, floor_rect.end)
+				_add_book(q, 0.8)
+				sfx("whoosh", -6.0, 1.2)
 			"hatch":
 				var e := spawn_enemy(Enemy.T.SUPER, resolve_circle(d["pos"], 15.0), true)
 				e.ability_cd = 1.0
+				e.max_hp *= 1.0 + pk("egg_hp")
+				e.hp = e.max_hp
 				add_fx({"kind": "poof", "pos": d["pos"], "dur": 0.5, "col": Color("fff6e0"), "r": 20.0})
 				sfx("egg")
 		d["done"] = true
@@ -1641,24 +1990,56 @@ func on_gem_taken(g: Dictionary) -> void:
 		hero.wariness["millet"] = minf(0.8, float(hero.wariness["millet"]) + 0.3)
 		match g["mod"]:
 			"trap":
-				hero.trapped = 1.0
+				var tt := 1.0 + pk("trap_time")
+				hero.trapped = tt
+				pstat_add("traps")
+				pstat_add("trap_time", tt)
+				if pk("trap_dmg") > 0.0:
+					hero.take_damage(pk("trap_dmg"), "trap", "Капкан", true)
+				if has_pk("trap_bleed"):
+					hero.add_dot(2.0 + pk("bleed_dps"), 4.0, "Рана от капкана")
+				if has_pk("trap_mark"):
+					hero.mark_t = maxf(hero.mark_t, pk("trap_mark"))
+				if has_pk("trap_path"):
+					_trap_path(Vector2(g["pos"]))
 				hero.say("Ай! Капкан! Это просо подозрительное.")
 				add_fx({"kind": "trap", "pos": hero.pos, "dur": 1.0})
 				sfx("trap")
 				_register_hit("trap")
 				add_text(hero.pos + Vector2(0, -50), "Капкан!", Color("6a4fb3"), 24)
 			"rotten":
-				hero.take_damage(8.0, "rotten", "Тухлое просо", true)
+				pstat_add("rottens")
+				hero.take_damage(8.0 + pk("rotten_dmg"), "rotten", "Тухлое просо", true)
+				if has_pk("rotten_slow"):
+					hero.slow(pk("rotten_slow"), 0.35)
+				if has_pk("rotten_xp"):
+					var lost := int(float(hero.xp) * (0.3 + pk("rotten_xp_more")))
+					hero.xp -= lost
+					if lost > 0:
+						add_text(hero.pos + Vector2(0, -78), "−%d опыта" % lost, Color("6a4fb3"), 18)
+				if has_pk("stink"):
+					hero.add_dot(pk("stink"), 3.0, "Вонь")
+				if has_pk("rot_harvest"):
+					hero.rot_left = 5
 				hero.say("Фу! Тухлое!")
 				add_fx({"kind": "stink", "pos": hero.pos, "dur": 1.2})
 				sfx("rotten")
 			"egg":
 				hero.say("Это было яйцо?!")
+				pstat_add("eggs")
 				delayed.append({"at": time + 0.6, "kind": "hatch", "pos": g["pos"]})
+				if has_pk("egg_twin"):
+					delayed.append({"at": time + 0.9, "kind": "hatch", "pos": Vector2(g["pos"]) + Vector2(24, 0)})
 				add_fx({"kind": "egg", "pos": g["pos"], "dur": 0.6})
 				sfx("egg")
 		return
-	hero.xp += int(g["xp"])
+	if hero.rot_left > 0 and not g["glow"]:
+		# «Гнилой урожай»: колосок испорчен
+		hero.rot_left -= 1
+		hero.take_damage(3.0, "rotten", "Гнилой колосок", true)
+		add_fx({"kind": "stink", "pos": hero.pos, "dur": 0.8})
+		return
+	hero.gain_xp(int(g["xp"]))
 	run_millet += int(g["xp"])
 	if g["glow"] and not event.is_empty() and event["type"] == "glow":
 		event["got"] = int(event["got"]) + 1
@@ -1914,28 +2295,62 @@ func on_fruit_eaten(f: String) -> void:
 const LU_PICK := 1.2
 const LU_SLOW := 1.8
 const LU_END := 2.4
-const SLING_BASE := 110.0
+const SLING_BASE := 130.0
 const SLING_STEP := 30.0
-const SOCK_SPEED_BASE := 1000.0
+const SOCK_SPEED_BASE := 1150.0
 const SOCK_SPEED_STEP := 250.0
 
 
 func sling_max() -> float:
-	return SLING_BASE + SLING_STEP * Meta.sling_power(meta)
+	return SLING_BASE * (1.0 + pk("sling_len"))
 
 
 func sling_speed() -> float:
-	return SOCK_SPEED_BASE + SOCK_SPEED_STEP * Meta.sling_power(meta)
+	return SOCK_SPEED_BASE * (1.0 + pk("sling_len"))
 
 
-func sling_branch() -> String:
-	return Meta.sling_branch(meta)
+func pk(k: String) -> float:
+	return float(perks.get(k, 0.0))
+
+
+func has_pk(k: String) -> bool:
+	return perks.has(k)
+
+
+## Счётчики игрока для условий узлов штаба (копятся всегда, даже без усиления).
+func pstat_add(k: String, n: float = 1.0) -> void:
+	run_pstats[k] = float(run_pstats.get(k, 0.0)) + n
+
+
+func throw_cd_full() -> float:
+	return maxf(1.2, THROW_CD - pk("throw_cd"))
+
+
+func book_cd_full() -> float:
+	var cd := maxf(4.0, METEOR_CD - pk("book_cd"))
+	if has_pk("librarian") and hero != null and hero.hp_frac() < 0.5:
+		cd *= 0.5
+	return cd
+
+
+func cage_cd_full() -> float:
+	return maxf(8.0, WAVE_CD - pk("cage_cd"))
+
+
+func millet_cd_full() -> float:
+	return maxf(10.0, MILLET_CD - pk("millet_cd"))
+
+
+func cage_trap_time() -> float:
+	return BASKET_TRAP + pk("cage_time")
 
 
 func _make_cards() -> Array:
 	var pool: Array = []
 	var h := hero
 	for k in Skills.SKILLS:
+		if not h.pool.has(k) and not h.skills.has(k):
+			continue
 		if h.skills.has(k):
 			if int(h.skills[k]) < Skills.MAX_SKILL_LVL:
 				pool.append({"key": k, "lvl": int(h.skills[k]) + 1, "new": false, "kind": "skill"})
@@ -2245,7 +2660,7 @@ func _sim_step() -> void:
 			"сломан" if boss_defeated else ("жив" if boss != null else "не появился"), hero.events_done, events_denied,
 			meteor_hits, meteors_cast, kills, hero.chests_opened])
 		print("УРОН ПО ГЕРОЮ: ", dmg_by_src)
-		print("ДАННЫЕ ", JSON.stringify({"over": over, "time": snappedf(time, 0.1), "level": hero.level, "boss_hp": (boss.hp / boss.max_hp if boss != null and not boss.dead else 0.0), "boss": boss_defeated, "skills": hero.skills, "mods": hero.mods.values(), "general": hero.general, "taken": dmg_by_src, "dealt": dealt_by_src, "events": hero.events_done, "events_total": events_total, "millet": run_millet, "feathers": save.get("feathers", 0), "up": meta["parrot"]["up"], "quests": hero.quests, "player_dmg": int(player_damage), "unlocked": meta["unlocked"].keys() + meta["sling"]["owned"].keys(), "plan": hero.plan, "kills": kills, "chests": hero.chests_opened, "fruits": fruits_eaten, "rams": rams, "hp_frac": hero.hp_frac(), "qall": _all_quests()}))
+		print("ДАННЫЕ ", JSON.stringify({"over": over, "time": snappedf(time, 0.1), "level": hero.level, "boss_hp": (boss.hp / boss.max_hp if boss != null and not boss.dead else 0.0), "boss": boss_defeated, "skills": hero.skills, "mods": hero.mods.values(), "general": hero.general, "taken": dmg_by_src, "dealt": dealt_by_src, "events": hero.events_done, "events_total": events_total, "millet": run_millet, "feathers": save.get("feathers", 0), "up": meta["parrot"]["up"], "quests": hero.quests, "player_dmg": int(player_damage), "unlocked": meta["unlocked"].keys(), "hq": Trees.bought_total(meta), "enh": Trees.hq(meta)["enh"], "pskills": Meta.parrot_skills(meta), "plan": hero.plan, "kills": kills, "chests": hero.chests_opened, "fruits": fruits_eaten, "rams": rams, "hp_frac": hero.hp_frac(), "qall": _all_quests()}))
 		get_tree().quit()
 
 
@@ -2338,7 +2753,8 @@ func _full_bot() -> void:
 			paw_bruise = PAW_BRUISE
 			rams += 1
 			if hero.focus.size() < 3 or randf() < 0.5:
-				hero.rammed(Vector2.RIGHT.rotated(randf() * TAU))
+				rams -= 1
+				apply_ram(Vector2.RIGHT.rotated(randf() * TAU))
 	if time >= _bot_throw:
 		_bot_throw = time + (randf_range(3.5, 6.0) if mid_bot else randf_range(2.0, 3.5))
 		for e in enemies_near(hero.pos, 7.0 * M, 20):
@@ -2353,7 +2769,8 @@ func _full_bot() -> void:
 		for g in gems:
 			if g["big"] and not g["glow"] and not g.has("mod") and Vector2(g["pos"]).distance_to(hero.pos) < 6.0 * M:
 				g["mod"] = ["trap", "rotten", "egg"][randi() % 3]
-				millet_cd = MILLET_CD
+				millet_cd = millet_cd_full()
+				pstat_add("swaps")
 				break
 	if wave_cd <= 0.0 and ability_unlocked("basket") and (not mid_bot or prog):
 		paw["pos"] = hero.pos + hero.vel * 1.4
@@ -2374,9 +2791,23 @@ func ability_unlocked(k: String) -> bool:
 			return true
 		"millet":
 			return Meta.unlocked(meta, "millet") and millet_unlocked
-		"book", "basket", "block":
+		"book":
+			return Meta.unlocked(meta, k) and time >= BOOK_UNLOCK
+		"basket":
+			return Meta.unlocked(meta, k) and time >= WAVE_UNLOCK
+		"block":
 			return Meta.unlocked(meta, k)
 	return false
+
+
+## Инструменты открываются по ходу забега, как раньше: таран 0:20, книга 2:00, клетка 3:00.
+func _check_unlocks() -> void:
+	if time >= RAM_UNLOCK:
+		unlock_ability("ram")
+	if Meta.unlocked(meta, "book") and time >= BOOK_UNLOCK:
+		unlock_ability("book")
+	if Meta.unlocked(meta, "basket") and time >= WAVE_UNLOCK:
+		unlock_ability("basket")
 
 
 
@@ -2391,7 +2822,7 @@ func unlock_ability(k: String) -> void:
 	if unlock_seen.has(k):
 		return
 	unlock_seen[k] = Time.get_ticks_msec() / 1000.0
-	var names := {"ram": "таран лапкой", "millet": "подмена проса", "book": "книга с полки [Q]", "basket": "корзина белья [W]"}
+	var names := {"ram": "таран лапкой", "millet": "подмена проса", "book": "книга с полки [Q]", "basket": "клетка [W]"}
 	if names.has(k) and not sim:
 		banner("Новое умение: " + String(names[k]), Color("6a4fb3"), 30, 2.4)
 		sfx("level", -8.0, 1.2)
@@ -2592,7 +3023,16 @@ func _save_run(feathers: int) -> void:
 		"events": hero.events_done, "events_total": events_total, "kills": kills, "millet": run_millet,
 		"throw_dmg": float(dmg_by_src.get("throw", 0)), "fruits": fruits_eaten, "level": hero.level, "rams": rams,
 	}
+	# счётчики игрока для условий штаба
+	var ps: Dictionary = meta.get("pstats", {})
+	for k in run_pstats:
+		ps[k] = float(ps.get(k, 0.0)) + float(run_pstats[k])
+	ps["rams_run"] = maxf(float(ps.get("rams_run", 0.0)), float(run_pstats.get("rams", 0.0)))
+	if over == "hero_dead":
+		ps["wins"] = float(ps.get("wins", 0.0)) + 1.0
+	meta["pstats"] = ps
 	var st: Dictionary = meta["stats"]
+	st["dodges"] = int(st.get("dodges", 0)) + hero_dodges
 	st["kills"] = int(st.get("kills", 0)) + kills
 	st["boss_kills"] = int(st.get("boss_kills", 0)) + (1 if boss_defeated else 0)
 	st["events"] = int(st.get("events", 0)) + hero.events_done
@@ -2606,13 +3046,16 @@ func _save_run(feathers: int) -> void:
 		if ok:
 			bank += int(Meta.quest_by_key(q)["reward"])
 	meta["parrot"]["bank"] = int(meta["parrot"]["bank"]) + bank
+	last["ach_new"] = Meta.claim_achievements(meta)
 	last["bought"] = Meta.parrot_shop(meta, mem)
-	var pool: Array = []
-	for q in Meta.QUESTS:
-		pool.append(q["key"])
-	pool.shuffle()
-	last["offer"] = pool.slice(0, 6)
-	last["picked"] = Meta.choose_quests(last["offer"], hero.greed0, mem)
+	# квесты появляются только с третьего забега, чтобы не вываливать всё сразу
+	if int(save["runs"]) >= 2:
+		var pool: Array = []
+		for q in Meta.QUESTS:
+			pool.append(q["key"])
+		pool.shuffle()
+		last["offer"] = pool.slice(0, 6)
+		last["picked"] = Meta.choose_quests(last["offer"], hero.greed0, mem)
 	meta["quests"] = last["picked"]
 	meta["last"] = last
 	if sim:
@@ -2621,54 +3064,90 @@ func _save_run(feathers: int) -> void:
 		var again := true
 		while again:
 			again = false
-			for it in Meta.SLING:
-				if not it.get("soon", false) and not Meta.sling_owned(meta, it["key"]) and (String(it["req"]) == "" or Meta.sling_owned(meta, it["req"])) and int(save["feathers"]) >= int(it["cost"]):
-					save["feathers"] = int(save["feathers"]) - int(it["cost"])
-					meta["sling"]["owned"][it["key"]] = true
-					if it["branch"]:
-						meta["sling"]["branch"] = ["fire", "knock"][randi() % 2] if meta["sling"]["owned"].size() > 3 else it["key"]
-					again = true
-					break
-			if again:
-				continue
 			for it in Meta.PLAYER:
 				if not Meta.unlocked(meta, it["key"]) and Meta.tier_open(meta, int(it["tier"])) and int(save["feathers"]) >= int(it["cost"]):
 					save["feathers"] = int(save["feathers"]) - int(it["cost"])
 					meta["unlocked"][it["key"]] = true
 					again = true
 					break
+		if Trees.hq_open(meta):
+			Trees.bot_buy(meta, save, ["throw", "book", "ram", "basket", "millet"])
 	save["meta"] = meta
 	Save.store(save)
 
 
-## Рогатка: покупка силы натяга и веток; купленную ветку можно выбрать на забег.
-func buy_sling(key: String) -> bool:
-	var sl: Dictionary = meta.get("sling", {"owned": {}, "branch": ""})
-	meta["sling"] = sl
-	for it in Meta.SLING:
-		if it["key"] != key or it.get("soon", false):
-			continue
-		if sl["owned"].has(key):
-			if it["branch"]:
-				sl["branch"] = "" if sl["branch"] == key else key
-				Save.store(save)
-				sfx("tick", 0.0, 1.2)
-				return true
-			return false
-		if String(it["req"]) != "" and not sl["owned"].has(it["req"]):
-			sfx("fail", -8.0, 1.4)
-			return false
-		if int(save.get("feathers", 0)) < int(it["cost"]):
-			sfx("fail", -8.0, 1.4)
-			return false
-		save["feathers"] = int(save["feathers"]) - int(it["cost"])
-		sl["owned"][key] = true
-		if it["branch"] and String(sl["branch"]) == "":
-			sl["branch"] = key
-		Save.store(save)
-		sfx("level", -4.0)
-		return true
-	return false
+## Действия на экране меты: исследования, узлы штаба, усиление, волны.
+func _meta_action(act: String) -> void:
+	if act == "":
+		return
+	var parts := act.split(":")
+	match parts[0]:
+		"new":
+			start_run()
+		"buy":
+			buy_unlock(parts[1])
+		"tab":
+			hud.hq_tab = parts[1]
+			sfx("tick", -6.0, 1.1)
+		"abil":
+			hud.hq_abil = parts[1]
+			sfx("tick", -6.0, 1.2)
+		"enh":
+			Trees.toggle_enh(meta, parts[1])
+			Save.store(save)
+			sfx("tick", 0.0, 1.4)
+		"node":
+			buy_node(parts[1], int(parts[2]), int(parts[3]))
+		"slot":
+			_cycle_slot(int(parts[1]), 1 if parts[2] == "next" else -1)
+		"pack":
+			buy_pack(parts[1])
+
+
+func buy_node(ab: String, bi: int, ni: int) -> bool:
+	var f := int(save.get("feathers", 0))
+	if Trees.why_not(meta, f, ab, bi, ni) != "":
+		sfx("fail", -8.0, 1.4)
+		return false
+	var id := Trees.node_id(ab, bi, ni)
+	var cur := Trees.lvl(meta, id)
+	save["feathers"] = f - Trees.cost(ni, cur)
+	Trees.hq(meta)["nodes"][id] = cur + 1
+	# первое дерево сразу становится усиленным, чтобы купленное работало
+	var h := Trees.hq(meta)
+	if h["enh"].size() < Trees.enh_slots(meta) and not h["enh"].has(ab):
+		h["enh"].append(ab)
+	save["meta"] = meta
+	Save.store(save)
+	sfx("level", -4.0)
+	return true
+
+
+func buy_pack(key: String) -> bool:
+	var pk_info := Trees.pack(key)
+	if Trees.pack_owned(meta, key):
+		return false
+	var f := int(save.get("feathers", 0))
+	if Trees.cond_progress(meta, pk_info["cond"]) < 1.0 or f < int(pk_info["cost"]):
+		sfx("fail", -8.0, 1.4)
+		return false
+	save["feathers"] = f - int(pk_info["cost"])
+	Trees.hq(meta)["packs"][key] = true
+	Save.store(save)
+	sfx("level", -4.0)
+	return true
+
+
+func _cycle_slot(i: int, dir: int) -> void:
+	var h := Trees.hq(meta)
+	var owned: Array = []
+	for pkk in Trees.PACKS:
+		if Trees.pack_owned(meta, pkk["key"]):
+			owned.append(pkk["key"])
+	var cur: int = owned.find(h["waves"][i])
+	h["waves"][i] = owned[posmod(cur + dir, owned.size())]
+	Save.store(save)
+	sfx("tick", -4.0, 1.0 + 0.05 * i)
 
 
 ## Покупка исследования игрока за перья (экран после забега).

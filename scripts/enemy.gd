@@ -24,6 +24,9 @@ var blue := 0.0
 var stun := 0.0
 var slow := 0.0
 var fear := 0.0
+## «Клич»: после тарана враг бросается на попугая быстрее.
+var rush := 0.0
+var rush_k := 1.6
 var burn := 0.0
 var burn_dps := 0.0
 var orbit_cd := 0.0

@@ -28,15 +28,20 @@ if __name__ == "__main__":
     with ThreadPoolExecutor(max_workers=k) as ex:
         all_series = list(ex.map(lambda i: series(i, n), range(k)))
     print(f"Серий: {k}, забегов в серии: {n}")
-    print("забег | побед попугая | ур. в конце | открыто у игрока | прокачка попугая (сумма ур.) | разные умения-планы")
-    for i in range(n):
-        rs = [s[i] for s in all_series if len(s) > i]
+    print("забеги | побед попугая | ур. в конце | исследований /6 | узлов штаба | прокачка попугая (сумма ур.) | умений у Кеши | перьев в запасе")
+    step = 1 if n <= 12 else 5
+    for i in range(0, n, step):
+        rs = [r for s in all_series for r in s[i:i + step]]
+        if not rs:
+            continue
         wins = sum(1 for r in rs if r["boss"])
         lvl = sum(r["level"] for r in rs) / len(rs)
         unl = sum(len(r["unlocked"]) for r in rs) / len(rs)
+        hq = sum(r.get("hq", 0) for r in rs) / len(rs)
         up = sum(sum(r["up"].values()) for r in rs) / len(rs)
-        plans = sorted(set(p for r in rs for p in r["plan"]))
-        print(f"{i + 1:5d} | {wins}/{len(rs)} | {lvl:.1f} | {unl:.1f}/10 | {up:.1f} | {', '.join(plans)}")
+        psk = sum(len(r.get("pskills", [])) for r in rs) / len(rs)
+        fe = sum(r.get("feathers", 0) for r in rs) / len(rs)
+        print(f"{i + 1:3d}-{min(n, i + step):3d} | {wins}/{len(rs)} ({100 * wins // len(rs)}%) | {lvl:.1f} | {unl:.1f} | {hq:.1f} | {up:.1f} | {psk:.1f} | {fe:.0f}")
     skills = {}
     for s in all_series:
         for r in s:

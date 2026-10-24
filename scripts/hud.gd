@@ -19,6 +19,9 @@ const APPEAR := 0.45
 var game
 var font: Font
 var _shown := {}
+## Штаб: открытая вкладка и выбранное умение в деревьях.
+var hq_tab := "trees"
+var hq_abil := "throw"
 
 
 func _ready() -> void:
@@ -190,7 +193,7 @@ func _draw_goals(h: Hero, fr: int) -> void:
 		_goal(Vector2(24, y), String(info.get("name", q)), false, false)
 		y += 24.0
 	if h.quests.is_empty():
-		_t(Vector2(44, 614), "квесты появятся после первого забега", 13, Color(INK, 0.5))
+		_t(Vector2(44, 614), "квесты появятся с третьего забега", 13, Color(INK, 0.5))
 
 func _hover_skill(keys: Array, gk: Array, h: Hero) -> String:
 	var p: Vector2 = game.paw["pos"]
@@ -380,7 +383,7 @@ const BTN := {
 	"ram": ["ram", "Таран лапкой", "мышь", "резкий взмах в попугая"],
 	"millet": ["millet", "Подмена проса", "ЛКМ", "клик по колоску"],
 	"book": ["book", "Книга с полки", "Q", "тень 1,2 с, −15% здоровья"],
-	"basket": ["basket", "Корзина-ловушка", "W", "тень 2 с, накрывает на 2 с"],
+	"basket": ["basket", "Клетка", "W", "тень ползёт за лапкой"],
 }
 
 
@@ -612,9 +615,17 @@ func _draw_parrot_meta(t: float) -> void:
 	else:
 		_t(Vector2(x + 16, y), ", ".join(bought), 15, Color("4f8f3a"))
 		y += 22
+	var ach_new: Array = last.get("ach_new", [])
+	for line in ach_new:
+		_t(Vector2(x + 16, y), "★ " + String(line), 15, Color("b07a1e"))
+		y += 22
 	y += 6
+	# прокачка: только открытые этапы, следующий — подсказкой
+	var stage := Meta.parrot_stage(meta)
 	var col := 0
 	for it in Meta.PARROT:
+		if int(it["stage"]) > stage:
+			continue
 		var lvl := int(meta["parrot"]["up"].get(it["key"], 0))
 		var px := x + col * 290
 		_t(Vector2(px, y + 18), "%s" % it["name"], 15)
@@ -622,25 +633,54 @@ func _draw_parrot_meta(t: float) -> void:
 		col += 1
 		if col == 3:
 			col = 0
-			y += 50
-	y += 20
-	# достижения
-	_t(Vector2(x, y), "Достижения", 17)
-	y += 14
+			y += 46
+	if col != 0:
+		y += 46
+	if stage + 1 < Meta.PARROT_STAGES.size():
+		_t(Vector2(x, y + 10), "Новые улучшения откроются, когда Кеша потратит %d проса (сейчас %d)" % [int(Meta.PARROT_STAGES[stage + 1]), int(meta["parrot"].get("spent", 0))], 14, Color(INK, 0.6))
+		y += 26
+	# умения, которые Кеша уже знает
+	var known := Meta.parrot_skills(meta)
+	var names: Array[String] = []
+	for k in known:
+		names.append(String(Skills.NAMES.get(k, k)))
+	_t(Vector2(x, y + 14), "Умения Кеши: " + ", ".join(names), 15)
+	var locked := 0
+	for sk in Meta.PARROT_SKILLS:
+		if not known.has(sk["key"]):
+			locked += 1
+	if locked > 0:
+		_t(Vector2(x + 560, y + 14), "ещё %d — за просо и достижения" % locked, 14, Color(INK, 0.55))
+	y += 50
+	# достижения: выполненные свёрнуты, видны 4 ближайших
 	var st: Dictionary = meta["stats"]
-	for i in Meta.ACHIEVEMENTS.size():
-		var a: Dictionary = Meta.ACHIEVEMENTS[i]
-		var v := float(st.get(a["stat"], 0))
-		var k := clampf(v / float(a["target"]), 0.0, 1.0)
+	var done := 0
+	var show: Array = []
+	for a2 in Meta.ACHIEVEMENTS:
+		if float(st.get(a2["stat"], 0)) >= float(a2["target"]):
+			done += 1
+		elif show.size() < 4:
+			show.append(a2)
+	_t(Vector2(x, y), "Достижения  %d/%d" % [done, Meta.ACHIEVEMENTS.size()], 17)
+	y += 14
+	for i in show.size():
+		var a3: Dictionary = show[i]
+		var v := float(st.get(a3["stat"], 0))
+		var k := clampf(v / float(a3["target"]), 0.0, 1.0)
 		var ax := x + (i % 2) * 430
 		var ay := y + 14 + int(i / 2) * 40
-		_t(Vector2(ax, ay + 12), String(a["name"]), 14, Color("4f8f3a") if k >= 1.0 else INK)
-		_bar(Rect2(ax + 170, ay, 230, 14), k, Color("e8b84a"), "%d/%d" % [int(minf(v, float(a["target"]))), int(a["target"])])
-	y += 14 + 3 * 40 + 16
+		var rw := ("умение «%s»" % Skills.NAMES[a3["skill"]]) if a3.has("skill") else ("+%d проса" % int(a3["millet"]))
+		_t(Vector2(ax, ay + 12), String(a3["name"]), 14)
+		_bar(Rect2(ax + 160, ay, 130, 14), k, Color("e8b84a"), "%d/%d" % [int(minf(v, float(a3["target"]))), int(a3["target"])])
+		_t(Vector2(ax + 298, ay + 12), rw, 12, Color(INK, 0.6))
+	y += 14 + 2 * 40 + 12
 	# выбор квестов: 6 на выбор, попугай берёт 2 сам
+	var offer: Array = last.get("offer", [])
+	if offer.is_empty():
+		_t(Vector2(x, y), "Квесты откроются с третьего забега", 17, Color(INK, 0.6))
+		return
 	_t(Vector2(x, y), "Квесты на следующий забег: Кеша выбирает 2 из 6", 17)
 	y += 16
-	var offer: Array = last.get("offer", [])
 	var picked: Array = last.get("picked", [])
 	for i in offer.size():
 		var appear := clampf((t - 0.6 - i * 0.15) / 0.3, 0.0, 1.0)
@@ -658,6 +698,9 @@ func _draw_parrot_meta(t: float) -> void:
 
 
 func _draw_player_meta(t: float) -> void:
+	if Trees.hq_open(game.meta):
+		_draw_hq(t)
+		return
 	var r := META_PLAYER
 	Art.card(self, r, PANEL, Art.frame() + 3, INK, 3.0)
 	var x := r.position.x + 30
@@ -700,47 +743,12 @@ func _draw_player_meta(t: float) -> void:
 			shown_locked = true
 	if shown_locked or not Meta.tier_open(meta, 2):
 		Art.text_c(self, font, Vector2(r.get_center().x, unlock_rect(2, 0).end.y + 30), "Разблокируйте контент выше, чтобы открыть дальнейшие исследования", 16, Color(INK, 0.65))
-	_draw_sling_meta(feathers)
-
-
-## Рогатка: сила натяга и ветки. Купленную ветку кликом выбирают на следующий забег.
-func _draw_sling_meta(feathers: int) -> void:
-	var meta: Dictionary = game.meta
-	var top := sling_rect(0).position.y
-	_t(Vector2(META_PLAYER.position.x + 30, top - 12), "Рогатка: сила и ветка на забег", 17)
-	var branch := Meta.sling_branch(meta)
-	for i in Meta.SLING.size():
-		var it: Dictionary = Meta.SLING[i]
-		var cr := sling_rect(i)
-		var soon: bool = it.get("soon", false)
-		var have := Meta.sling_owned(meta, it["key"])
-		var req_ok: bool = String(it["req"]) == "" or Meta.sling_owned(meta, it["req"])
-		var can: bool = not soon and not have and req_ok and feathers >= int(it["cost"])
-		var active: bool = have and branch == it["key"]
-		var hov: bool = cr.has_point(game.paw["pos"])
-		var fill := Color(1, 0.9, 0.6) if active else (Color(0.9, 0.97, 0.88) if have else (Color(1, 0.93, 0.7) if can and hov else (PANEL if not soon else Color(0.9, 0.88, 0.84))))
-		Art.card(self, cr, fill, Art.frame() + 20 + i, INK if not soon else Color(INK, 0.4), 3.0 if active else 1.8)
-		Icons.draw(self, it["icon"], cr.position + Vector2(cr.size.x * 0.5, 34), 44.0, 1.0 if have or can else 0.5)
-		Art.text_c(self, font, cr.position + Vector2(cr.size.x * 0.5, 76), String(it["name"]), 14, INK if not soon else Color(INK, 0.5))
-		var tag := ""
-		if soon:
-			tag = "скоро"
-		elif active:
-			tag = "ветка на забег"
-		elif have:
-			tag = "клик — выбрать" if it["branch"] else "куплено"
-		elif not req_ok:
-			tag = "нужна тугая резинка"
-		else:
-			tag = "%d перьев" % int(it["cost"])
-		Art.text_c(self, font, cr.position + Vector2(cr.size.x * 0.5, 98), tag, 13, Color("8a5a1e") if can or active else Color(INK, 0.6))
-		if hov and not soon:
-			draw_multiline_string(font, Vector2(META_PLAYER.position.x + 30, cr.end.y + 22), String(it["desc"]), HORIZONTAL_ALIGNMENT_LEFT, 860, 14, 2, Color(INK, 0.8))
-
-
-func sling_rect(i: int) -> Rect2:
-	var r := META_PLAYER
-	return Rect2(r.position.x + 30 + i * 174, r.position.y + 770, 164, 112)
+	else:
+		Art.text_c(self, font, Vector2(r.get_center().x, unlock_rect(2, 0).end.y + 30), "Всё исследовано: следующий экран — штаб с деревьями умений", 16, Color("8a5a1e"))
+	var tr := Rect2(r.position.x + 30, r.position.y + 760, 860, 150)
+	Art.card(self, tr, Color(0.9, 0.88, 0.84), Art.frame() + 40, Color(INK, 0.4), 1.8)
+	Art.text_c(self, font, tr.get_center() + Vector2(0, -12), "Штаб", 26, Color(INK, 0.45))
+	Art.text_c(self, font, tr.get_center() + Vector2(0, 20), "откроется, когда будут куплены все исследования выше", 15, Color(INK, 0.45))
 
 
 func unlock_rect(tier: int, i: int) -> Rect2:
@@ -748,11 +756,15 @@ func unlock_rect(tier: int, i: int) -> Rect2:
 	return Rect2(r.position.x + 30 + i * 440, r.position.y + 140 + tier * 170, 420, 120)
 
 
-## Клики на экране меты: покупка исследования или новый забег.
-func meta_click(p: Vector2) -> String:
-	if _meta_t() > 2.0 and NEW_RUN.has_point(p):
+## Клики на экране меты: покупка исследования, штаб или новый забег.
+func meta_click(p: Vector2, rmb: bool = false) -> String:
+	if _meta_t() > 2.0 and NEW_RUN.has_point(p) and not rmb:
 		return "new"
 	if _meta_t() < 1.6:
+		return ""
+	if Trees.hq_open(game.meta):
+		return _hq_click(p, rmb)
+	if rmb:
 		return ""
 	for tier in 3:
 		var i := 0
@@ -762,10 +774,276 @@ func meta_click(p: Vector2) -> String:
 			if unlock_rect(tier, i).has_point(p):
 				return "buy:" + String(it["key"])
 			i += 1
-	for i in Meta.SLING.size():
-		if sling_rect(i).has_point(p):
-			return "sling:" + String(Meta.SLING[i]["key"])
 	return ""
+
+
+# ---------- штаб ----------
+
+const HQ_NODE_R := [22.0, 20.0, 20.0, 28.0, 20.0, 20.0, 34.0]
+const C_OWN := Color("cfe8c4")
+const C_CAN := Color(1, 0.88, 0.5)
+
+
+func hq_tab_rect(i: int) -> Rect2:
+	return Rect2(META_PLAYER.position.x + 30 + i * 240, META_PLAYER.position.y + 92, 228, 44)
+
+
+func hq_abil_rect(i: int) -> Rect2:
+	return Rect2(META_PLAYER.position.x + 30 + i * 174, META_PLAYER.position.y + 150, 164, 84)
+
+
+func hq_star_rect(i: int) -> Rect2:
+	var r := hq_abil_rect(i)
+	return Rect2(r.end.x - 34, r.position.y + 4, 30, 30)
+
+
+func hq_node_pos(bi: int, ni: int) -> Vector2:
+	var lay: Vector2 = Trees.LAYOUT[ni]
+	var cx := META_PLAYER.position.x + 30 + 143 + bi * 292
+	return Vector2(cx + lay.x * 72.0, META_PLAYER.position.y + 340 + lay.y * 106.0)
+
+
+func hq_slot_rect(i: int) -> Rect2:
+	return Rect2(META_PLAYER.position.x + 30 + (i % 4) * 216, META_PLAYER.position.y + 190 + int(i / 4) * 118, 206, 104)
+
+
+func hq_pack_rect(i: int) -> Rect2:
+	return Rect2(META_PLAYER.position.x + 30 + (i % 2) * 432, META_PLAYER.position.y + 470 + int(i / 2) * 100, 422, 90)
+
+
+func _hq_click(p: Vector2, rmb: bool) -> String:
+	var meta: Dictionary = game.meta
+	if not rmb:
+		if hq_tab_rect(0).has_point(p):
+			return "tab:trees"
+		if hq_tab_rect(1).has_point(p) and Trees.waves_open(meta):
+			return "tab:waves"
+	if hq_tab == "waves" and Trees.waves_open(meta):
+		for i in Trees.SEGMENTS:
+			if hq_slot_rect(i).has_point(p):
+				return "slot:%d:%s" % [i, "prev" if rmb else "next"]
+		if not rmb:
+			for i in Trees.PACKS.size():
+				if hq_pack_rect(i).has_point(p):
+					return "pack:" + String(Trees.PACKS[i]["key"])
+		return ""
+	if rmb:
+		return ""
+	for i in Trees.ABIL.size():
+		var ab: String = Trees.ABIL[i]
+		if not Trees.tree_open(meta, ab):
+			continue
+		if hq_star_rect(i).has_point(p):
+			return "enh:" + ab
+		if hq_abil_rect(i).has_point(p):
+			return "abil:" + ab
+	if Trees.tree_open(meta, hq_abil):
+		for bi in 3:
+			for ni in 7:
+				if hq_node_pos(bi, ni).distance_to(p) < float(HQ_NODE_R[ni]) + 4.0:
+					return "node:%s:%d:%d" % [hq_abil, bi, ni]
+	return ""
+
+
+func _draw_hq(t: float) -> void:
+	var r := META_PLAYER
+	var meta: Dictionary = game.meta
+	Art.card(self, r, PANEL, Art.frame() + 3, INK, 3.0)
+	var x := r.position.x + 30
+	var y := r.position.y + 50
+	_t(Vector2(x, y), "Штаб", 30)
+	var feathers := int(game.save.get("feathers", 0))
+	Icons._glyph(self, "feather", Vector2(x + 380, y - 10), 0.9, 1.0)
+	_t(Vector2(x + 400, y - 2), "%d перьев" % feathers, 22, Color("4f8f3a"))
+	var last: Dictionary = meta.get("last", {})
+	_t(Vector2(x + 560, y - 2), "за забег +%d" % int(last.get("feathers", 0)), 16, Color(INK, 0.6))
+	_t(Vector2(x, y + 26), "Улучшений куплено: %d" % Trees.bought_total(meta), 14, Color(INK, 0.6))
+	var mp: Vector2 = game.paw["pos"]
+	# вкладки
+	var wopen := Trees.waves_open(meta)
+	if hq_tab == "waves" and not wopen:
+		hq_tab = "trees"
+	for i in 2:
+		var tr := hq_tab_rect(i)
+		var on := (i == 0 and hq_tab == "trees") or (i == 1 and hq_tab == "waves")
+		var avail := i == 0 or wopen
+		Art.card(self, tr, Color(1, 0.93, 0.7) if on else (PANEL if avail else Color(0.9, 0.88, 0.84)), Art.frame() + 50 + i, INK if avail else Color(INK, 0.4), 2.5 if on else 1.5)
+		var label := "Деревья умений" if i == 0 else ("Волны" if wopen else "Волны · после %d улучшений" % Trees.WAVES_AT)
+		Art.text_c(self, font, tr.get_center() + Vector2(0, 7), label, 18 if avail else 14, INK if avail else Color(INK, 0.5))
+	if hq_tab == "waves":
+		_draw_hq_waves(meta, feathers, mp)
+	else:
+		_draw_hq_trees(meta, feathers, mp)
+
+
+func _draw_hq_trees(meta: Dictionary, feathers: int, mp: Vector2) -> void:
+	var r := META_PLAYER
+	var h := Trees.hq(meta)
+	var enh: Array = h["enh"]
+	if not Trees.tree_open(meta, hq_abil):
+		hq_abil = "throw"
+	var teaser_shown := false
+	for i in Trees.ABIL.size():
+		var ab: String = Trees.ABIL[i]
+		var cr := hq_abil_rect(i)
+		var open := Trees.tree_open(meta, ab)
+		if not open:
+			# закрытые деревья: видно только ближайшее, остальные — силуэтом
+			Art.card(self, cr, Color(0.9, 0.88, 0.84), Art.frame() + 60 + i, Color(INK, 0.35), 1.5)
+			if not teaser_shown:
+				teaser_shown = true
+				Art.text_c(self, font, cr.get_center() + Vector2(0, -6), "???", 22, Color(INK, 0.4))
+				Art.text_c(self, font, cr.get_center() + Vector2(0, 18), "после %d улучшений" % int(Trees.OPEN_AT[ab]), 13, Color(INK, 0.5))
+			continue
+		var sel := ab == hq_abil
+		var is_enh := enh.has(ab)
+		Art.card(self, cr, Color(1, 0.93, 0.7) if sel else PANEL, Art.frame() + 60 + i, INK, 3.0 if sel else 1.8)
+		Icons.draw(self, Trees.ABIL_ICON[ab], cr.position + Vector2(32, 34), 42.0, 1.0)
+		_t(cr.position + Vector2(8, 74), String(Trees.ABIL_NAMES[ab]), 15)
+		# звезда: усиленное на забег
+		var sr := hq_star_rect(i)
+		var hov := sr.has_point(mp)
+		Icons._star(self, sr.get_center(), 13.0, Color("f2c14e") if is_enh else (Color(1, 1, 1) if hov else Color(0.85, 0.82, 0.76)), 1.0)
+	var names: Array[String] = []
+	for ab in enh:
+		names.append(String(Trees.ABIL_NAMES[ab]))
+	var slots := Trees.enh_slots(meta)
+	var msg := "Усилены на забег (★): %s · слотов %d/%d" % [", ".join(names) if names.size() > 0 else "ничего", enh.size(), slots]
+	if slots < 2:
+		msg += " · второй слот после %d улучшений" % Trees.SECOND_SLOT_AT
+	_t(Vector2(r.position.x + 30, r.position.y + 262), msg, 15, Color("8a5a1e") if enh.size() > 0 else Color("b23a2e"))
+	var ab: String = hq_abil
+	var active := enh.has(ab)
+	if not active:
+		_t(Vector2(r.position.x + 30, r.position.y + 284), "Это дерево сейчас не усилено: купленное в нём заработает, когда отметите звезду.", 13, Color(INK, 0.6))
+	var tip := []
+	for bi in 3:
+		var br: Dictionary = Trees.BRANCHES[ab][bi]
+		var hx := hq_node_pos(bi, 0).x
+		Art.text_c(self, font, Vector2(hx, r.position.y + 310), String(br["name"]), 18, INK)
+		# связи
+		for ni in 7:
+			var a := hq_node_pos(bi, ni)
+			var reqs: Array = [[], [0], [0], [1, 2], [3], [3], [4, 5]][ni]
+			for rq in reqs:
+				var b := hq_node_pos(bi, rq)
+				var on := Trees.lvl(meta, Trees.node_id(ab, bi, rq)) > 0
+				draw_line(b, a, Color(INK, 0.75) if on else Color(INK, 0.18), 3.0 if on else 2.0, true)
+		for ni in 7:
+			var c := hq_node_pos(bi, ni)
+			var rr: float = HQ_NODE_R[ni]
+			var n: Array = Trees.node(ab, bi, ni)
+			var lv := Trees.lvl(meta, Trees.node_id(ab, bi, ni))
+			var mx := int(n[4])
+			var reach := Trees.reachable(meta, ab, bi, ni)
+			var why := Trees.why_not(meta, feathers, ab, bi, ni)
+			var fill := Color(0.88, 0.86, 0.82)
+			if lv >= mx:
+				fill = Color("9fcf8c")
+			elif lv > 0:
+				fill = C_OWN
+			elif why == "":
+				fill = C_CAN.lerp(Color(1, 0.97, 0.85), 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.006))
+			elif reach:
+				fill = PANEL
+			var shape: PackedVector2Array
+			if ni == 3:
+				shape = PackedVector2Array([c + Vector2(0, -rr), c + Vector2(rr, 0), c + Vector2(0, rr), c + Vector2(-rr, 0)])
+			elif ni == 6:
+				shape = PackedVector2Array()
+				for k in 12:
+					var ang := -PI * 0.5 + TAU * k / 12.0
+					shape.append(c + Vector2(cos(ang), sin(ang)) * (rr if k % 2 == 0 else rr * 0.72))
+			else:
+				shape = Art.ellipse_pts(c, rr, rr, ni + bi * 7, 0.04, 16)
+			draw_colored_polygon(shape, fill)
+			Art.outline(self, shape, INK if reach or lv > 0 else Color(INK, 0.35), 2.5 if why == "" else 1.8)
+			if reach or lv > 0:
+				if ni == 3 or ni == 6:
+					Icons._glyph(self, Trees.ABIL_ICON[ab], c, 0.55 if ni == 3 else 0.7, 1.0)
+				else:
+					Art.text_c(self, font, c + Vector2(0, 6), "%d/%d" % [lv, mx], 14, INK)
+				var cond: Array = n[5]
+				if not cond.is_empty() and lv == 0:
+					var k := Trees.cond_progress(meta, cond)
+					draw_arc(c, rr + 6, -PI * 0.5, -PI * 0.5 + TAU * k, 32, Color("6a4fb3"), 3.0, true)
+					if k < 1.0:
+						draw_arc(c, rr + 6, -PI * 0.5 + TAU * k, PI * 1.5, 32, Color(0.42, 0.31, 0.7, 0.2), 3.0, true)
+				var lw := Art.text_w(font, String(n[0]), 12)
+				draw_rect(Rect2(c + Vector2(-lw * 0.5 - 4, rr + 6), Vector2(lw + 8, 16)), PANEL)
+				Art.text_c(self, font, c + Vector2(0, rr + 18), String(n[0]), 12, INK if reach else Color(INK, 0.5))
+			else:
+				Art.text_c(self, font, c + Vector2(0, 6), "?", 16, Color(INK, 0.35))
+			if c.distance_to(mp) < rr + 4.0:
+				tip = [bi, ni]
+	# подсказка по узлу под курсором
+	var tr := Rect2(r.position.x + 30, r.position.y + 846, 860, 92)
+	Art.card(self, tr, Color(1, 0.98, 0.9), Art.frame() + 70, Color(INK, 0.6), 1.5)
+	if tip.is_empty():
+		_t(tr.position + Vector2(14, 28), "Наведите на узел дерева. Ромб — ключевая пассивка, звезда — вершина ветки.", 15, Color(INK, 0.65))
+		_t(tr.position + Vector2(14, 54), "К ключевому узлу и вершине ведут два пути: хватит любого из боковых узлов.", 15, Color(INK, 0.65))
+		_t(tr.position + Vector2(14, 80), "Ключевые узлы сначала надо заслужить в забегах (фиолетовая дуга — прогресс условия).", 15, Color(INK, 0.65))
+		return
+	var bi2: int = tip[0]
+	var ni2: int = tip[1]
+	var n2: Array = Trees.node(ab, bi2, ni2)
+	var lv2 := Trees.lvl(meta, Trees.node_id(ab, bi2, ni2))
+	var reach2 := Trees.reachable(meta, ab, bi2, ni2)
+	if not reach2 and lv2 == 0:
+		_t(tr.position + Vector2(14, 30), "Скрытый узел", 18)
+		_t(tr.position + Vector2(14, 58), "Откроется, когда купите узел выше по ветке.", 15, Color(INK, 0.7))
+		return
+	var kind := "вершина ветки" if ni2 == 6 else ("ключевая пассивка" if ni2 == 3 else "улучшение")
+	_t(tr.position + Vector2(14, 28), "%s · %s · уровень %d/%d" % [String(n2[0]), kind, lv2, int(n2[4])], 18)
+	_t(tr.position + Vector2(14, 54), String(n2[1]), 15, Color(INK, 0.8))
+	var why2 := Trees.why_not(meta, feathers, ab, bi2, ni2)
+	var cond2: Array = n2[5]
+	var line := ""
+	if lv2 >= int(n2[4]):
+		line = "куплено полностью"
+	else:
+		line = "цена %d перьев" % Trees.cost(ni2, lv2)
+		if not cond2.is_empty():
+			line += " · условие: %s (%d/%d)" % [String(cond2[2]), mini(Trees.pstat(meta, cond2[0]), int(cond2[1])), int(cond2[1])]
+		if why2 == "":
+			line += " · кликните, чтобы купить"
+		elif why2 == "не хватает перьев":
+			line += " · не хватает перьев"
+	_t(tr.position + Vector2(14, 80), line, 14, Color("8a5a1e") if why2 == "" else Color(INK, 0.65))
+
+
+func _draw_hq_waves(meta: Dictionary, feathers: int, mp: Vector2) -> void:
+	var r := META_PLAYER
+	var h := Trees.hq(meta)
+	_t(Vector2(r.position.x + 30, r.position.y + 172), "Состав орды по 30 секунд до пылесоса. ЛКМ — следующий состав, ПКМ — предыдущий.", 15, Color(INK, 0.7))
+	for i in Trees.SEGMENTS:
+		var cr := hq_slot_rect(i)
+		var pkk: Dictionary = Trees.pack(h["waves"][i])
+		var hov := cr.has_point(mp)
+		var is_mix: bool = pkk["key"] == "mix"
+		Art.card(self, cr, Color(1, 0.93, 0.7) if hov else (PANEL if is_mix else Color(0.93, 0.9, 1.0)), Art.frame() + 80 + i, INK, 2.0)
+		_t(cr.position + Vector2(12, 24), "%s–%s" % [mmss(i * 30.0), mmss(i * 30.0 + 30.0)], 14, Color(INK, 0.6))
+		_t(cr.position + Vector2(12, 52), String(pkk["name"]), 18)
+		draw_multiline_string(font, cr.position + Vector2(12, 74), String(pkk["desc"]), HORIZONTAL_ALIGNMENT_LEFT, 186, 12, 2, Color(INK, 0.65))
+	_t(Vector2(r.position.x + 30, r.position.y + 458), "Составы орды", 17)
+	for i in Trees.PACKS.size():
+		var pkk: Dictionary = Trees.PACKS[i]
+		var cr := hq_pack_rect(i)
+		var own := Trees.pack_owned(meta, pkk["key"])
+		var cond_ok := Trees.cond_progress(meta, pkk["cond"]) >= 1.0
+		var can: bool = not own and cond_ok and feathers >= int(pkk["cost"])
+		var hov := cr.has_point(mp)
+		Art.card(self, cr, C_OWN if own else (C_CAN if can and hov else (PANEL if cond_ok else Color(0.9, 0.88, 0.84))), Art.frame() + 90 + i, INK if cond_ok or own else Color(INK, 0.45), 2.5 if can else 1.6)
+		_t(cr.position + Vector2(14, 28), String(pkk["name"]), 18, INK if cond_ok or own else Color(INK, 0.5))
+		draw_multiline_string(font, cr.position + Vector2(14, 50), String(pkk["desc"]), HORIZONTAL_ALIGNMENT_LEFT, 300, 13, 2, Color(INK, 0.7))
+		var tag := "есть"
+		if not own:
+			tag = "%d перьев" % int(pkk["cost"])
+			if not cond_ok:
+				var cd: Array = pkk["cond"]
+				tag = "условие: %s (%d/%d)" % [String(cd[2]), mini(Trees.pstat(meta, cd[0]), int(cd[1])), int(cd[1])]
+		_t(cr.position + Vector2(14 if not cond_ok and not own else 300, 82), tag, 13, Color("4f8f3a") if own else (Color("8a5a1e") if can else Color(INK, 0.55)))
+
 
 func _shares_list(p: Vector2, d: Dictionary, names: Dictionary, col: Color) -> void:
 	var tot := 0.0

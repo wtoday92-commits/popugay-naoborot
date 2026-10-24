@@ -110,7 +110,10 @@ func _draw() -> void:
 		if f["kind"] != "burnline" and f["kind"] != "event_card" and f["kind"] != "reward_fly":
 			_draw_fx(f, fr)
 	for m in game.meteors:
-		_draw_book(m, fr)
+		if m.has("basket"):
+			_draw_basket_front(m)
+		else:
+			_draw_book(m, fr)
 	_draw_focus()
 	_draw_overhead()
 	_draw_boss_bar()
@@ -949,7 +952,7 @@ func _draw_shadow(m: Dictionary) -> void:
 
 
 func _draw_book(m: Dictionary, fr: int) -> void:
-	if m["landed"] or m.has("basket"):
+	if m["landed"] or m.has("basket") or m.has("fake"):
 		return
 	var k := clampf(float(m["t"]) / float(m["delay"]), 0.0, 1.0)
 	if k < 0.55:
@@ -1023,6 +1026,23 @@ func _draw_fx(f: Dictionary, fr: int) -> void:
 			for i in 3:
 				var a := d.angle() + (i - 1) * 0.7
 				draw_line(to + Vector2(cos(a), sin(a)) * 8.0, to + Vector2(cos(a), sin(a)) * (14.0 + 8.0 * k), Color(0.95, 0.75, 0.3, 1.0 - k), 2.5)
+		"zap":
+			var pts: PackedVector2Array = f["pts"]
+			var jag := PackedVector2Array()
+			for i in pts.size() - 1:
+				var a0: Vector2 = pts[i]
+				var a1: Vector2 = pts[i + 1]
+				var nrm := (a1 - a0).normalized().orthogonal()
+				for j in 4:
+					var q := a0.lerp(a1, float(j) / 4.0)
+					jag.append(q + nrm * (0.0 if j == 0 else randf_range(-7.0, 7.0)))
+			if pts.size() > 0:
+				jag.append(pts[pts.size() - 1])
+			if jag.size() > 1:
+				draw_polyline(jag, Color(0.55, 0.75, 1.0, 0.5 * (1.0 - k)), 7.0, true)
+				draw_polyline(jag, Color(1.0, 0.97, 0.6, 1.0 - k), 2.5, true)
+			for q in pts:
+				draw_circle(q, 5.0 * (1.0 - k) + 1.0, Color(1.0, 0.95, 0.5, 1.0 - k))
 		"jingle":
 			for i in 3:
 				draw_arc(p, 14.0 + i * 12.0 + k * 20.0, 0, TAU, 24, Color(0.45, 0.5, 0.6, 0.8 * (1.0 - k)), 2.0, true)
@@ -1181,34 +1201,101 @@ func _card_tip(c: Dictionary, sc: Dictionary, cp: Vector2) -> void:
 
 
 
-## Корзина-ловушка: тень медленно растёт, корзина падает сверху и держит попугая под собой.
+## Клетка: пока падает, её тень ползёт за лапкой; приземлилась — стоит над попугаем.
+## Рисуется в два прохода: задние прутья и поддон под всеми, передние прутья — поверх.
 func _draw_basket(m: Dictionary) -> void:
 	var p: Vector2 = m["pos"]
 	var r: float = m["r"]
 	if not m["landed"]:
 		var k := clampf(float(m["t"]) / float(m["delay"]), 0.0, 1.0)
-		Art.fill_blob(self, p, r * (0.3 + 0.7 * k), r * (0.3 + 0.7 * k) * 0.9, Color(0.25, 0.18, 0.1, 0.12 + 0.28 * k))
-		draw_arc(p, r, 0, TAU, 40, Color(0.42, 0.31, 0.7, 0.6), 2.0, true)
-		if k > 0.7:
-			var kk := (k - 0.7) / 0.3
-			_basket_shape(p - Vector2(0, pow(1.0 - kk, 2.0) * 380.0), r * (1.3 - 0.3 * kk), 1.0)
+		var hidden := float(m["t"]) < float(m.get("hidden", 0.0))
+		var sa := 0.35 if hidden else 1.0
+		Art.fill_blob(self, p, r * (0.3 + 0.7 * k), r * (0.3 + 0.7 * k) * 0.42, Color(0.25, 0.18, 0.1, (0.12 + 0.28 * k) * sa))
+		draw_arc(p, r, 0, TAU, 40, Color(0.42, 0.31, 0.7, 0.6 * sa), 2.0, true)
+		# прицел-крестик: клетка тянется к лапке
+		var to: Vector2 = game.paw["pos"]
+		if to.distance_to(p) > 8.0:
+			draw_line(p, p + (to - p).limit_length(r * 0.8), Color(0.42, 0.31, 0.7, 0.45 * sa), 2.0, true)
 		return
 	var lt: float = m["land_t"]
-	var a := 1.0 - clampf((lt - game.BASKET_TRAP) / 0.3, 0.0, 1.0)
+	var tt: float = m.get("trap", game.BASKET_TRAP)
+	var a := 1.0 - clampf((lt - tt) / 0.3, 0.0, 1.0)
 	var bounce := absf(sin(lt * 18.0)) * 6.0 * maxf(0.0, 1.0 - lt * 2.0)
-	_basket_shape(p - Vector2(0, bounce), r, a)
-	if m.has("caught") and lt < game.BASKET_TRAP:
-		var left: float = 1.0 - lt / game.BASKET_TRAP
+	_cage(p - Vector2(0, bounce), r, a, 0)
+	if m.has("caught") and lt < tt:
+		var left: float = 1.0 - lt / tt
 		draw_arc(p, r + 10, -PI * 0.5, -PI * 0.5 + TAU * left, 32, Color(0.42, 0.31, 0.7, 0.9), 4.0, true)
 
 
-func _basket_shape(c: Vector2, r: float, a: float) -> void:
-	var body := PackedVector2Array([c + Vector2(-r, 0), c + Vector2(-r * 0.8, -r * 1.1), c + Vector2(r * 0.8, -r * 1.1), c + Vector2(r, 0)])
-	draw_colored_polygon(body, Color(0.85, 0.72, 0.5, 0.85 * a))
-	for i in 7:
-		var x := -r * 0.85 + i * r * 0.28
-		draw_line(c + Vector2(x, -2), c + Vector2(x * 0.82, -r * 1.08), Color(0.55, 0.42, 0.25, a), 2.5)
-	for j in 3:
-		var yy := -r * (0.25 + 0.3 * j)
-		draw_line(c + Vector2(-r * (1.0 - 0.07 * j), yy), c + Vector2(r * (1.0 - 0.07 * j), yy), Color(0.55, 0.42, 0.25, a), 2.0)
-	Art.outline(self, body, Color(INK, a), 3.0)
+## Передний план клетки: падающая клетка целиком или передние прутья стоящей.
+func _draw_basket_front(m: Dictionary) -> void:
+	var p: Vector2 = m["pos"]
+	var r: float = m["r"]
+	if not m["landed"]:
+		var k := clampf(float(m["t"]) / float(m["delay"]), 0.0, 1.0)
+		if k > 0.6:
+			var kk := (k - 0.6) / 0.4
+			var c := p - Vector2(0, pow(1.0 - kk, 2.0) * 420.0)
+			var sc := 1.25 - 0.25 * kk
+			_cage(c, r * sc, 1.0, 0)
+			_cage(c, r * sc, 1.0, 1)
+		return
+	var lt: float = m["land_t"]
+	var tt: float = m.get("trap", game.BASKET_TRAP)
+	var a := 1.0 - clampf((lt - tt) / 0.3, 0.0, 1.0)
+	var bounce := absf(sin(lt * 18.0)) * 6.0 * maxf(0.0, 1.0 - lt * 2.0)
+	_cage(p - Vector2(0, bounce), r, a, 1)
+
+
+const CAGE_GOLD := Color("d9ae4f")
+const CAGE_DARK := Color("8a6a2a")
+
+
+## Птичья клетка-купол: поддон, 12 прутьев, два кольца, крючок сверху. part 0 — задняя половина, 1 — передняя.
+func _cage(c: Vector2, r: float, a: float, part: int) -> void:
+	var ry := r * 0.4
+	var h := r * 1.75
+	var bars := 12
+	if part == 0:
+		# поддон и тень
+		Art.fill_blob(self, c + Vector2(0, 6), r * 1.08, ry * 1.1, Color(0, 0, 0, 0.18 * a))
+		var tray := Art.ellipse_pts(c, r * 1.06, ry * 1.06, 3, 0.0, 28)
+		draw_colored_polygon(tray, Color(0.55, 0.38, 0.22, 0.9 * a))
+		Art.outline(self, tray, Color(INK, a), 2.5)
+		draw_colored_polygon(Art.ellipse_pts(c + Vector2(0, -3), r * 0.92, ry * 0.88, 5, 0.0, 28), Color(0.85, 0.75, 0.55, 0.55 * a))
+	# прутья: задние (верх эллипса) в первом проходе, передние — во втором
+	for i in bars:
+		var ang := TAU * (float(i) + 0.5) / float(bars)
+		var front := sin(ang) >= 0.0
+		if front != (part == 1):
+			continue
+		var pts := PackedVector2Array()
+		for j in 9:
+			var t := float(j) / 8.0
+			var kk := sqrt(maxf(0.0, 1.0 - t * t * 0.96))
+			pts.append(c + Vector2(r * cos(ang) * kk, ry * sin(ang) * kk - h * t))
+		var shade := 1.0 if front else 0.55
+		draw_polyline(pts, Color(INK, a * shade), 4.0, true)
+		draw_polyline(pts, Color(CAGE_GOLD.lerp(CAGE_DARK, 1.0 - shade), a), 2.0, true)
+	# кольца: середина и верх, половинки по проходам
+	for t in [0.42, 0.85]:
+		var kk := sqrt(maxf(0.0, 1.0 - t * t * 0.96))
+		var cc := c - Vector2(0, h * t)
+		var from := PI if part == 0 else 0.0
+		var arc := PackedVector2Array()
+		for j in 17:
+			var ang2 := from + PI * float(j) / 16.0
+			arc.append(cc + Vector2(r * kk * cos(ang2), ry * kk * sin(ang2)))
+		draw_polyline(arc, Color(INK, a), 4.5, true)
+		draw_polyline(arc, Color(CAGE_GOLD, a), 2.5, true)
+	if part == 1:
+		# передний край поддона и крючок
+		var rim := PackedVector2Array()
+		for j in 17:
+			var ang3 := PI * float(j) / 16.0
+			rim.append(c + Vector2(r * 1.06 * cos(ang3), ry * 1.06 * sin(ang3)))
+		draw_polyline(rim, Color(INK, a), 3.0, true)
+		var top := c - Vector2(0, h)
+		draw_arc(top - Vector2(0, 9), 8.0, 0, TAU, 16, Color(INK, a), 4.0, true)
+		draw_arc(top - Vector2(0, 9), 8.0, 0, TAU, 16, Color(CAGE_GOLD, a), 2.0, true)
+		draw_circle(top, 4.0, Color(CAGE_GOLD, a))

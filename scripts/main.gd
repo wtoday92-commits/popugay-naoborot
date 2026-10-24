@@ -213,6 +213,10 @@ var throw_ready_flash := 0.0
 var _was_cd := false
 ## Сложность забега (0 — обычная, 1 — средняя, 2 — сложная) и зоны на полу (пыль, искры пылесоса).
 var diff := 0
+## Скорлупки-мины и вихри попугая.
+var mines: Array = []
+var tornados: Array = []
+var force_bird := ""
 var zones: Array = []
 var force_diff := -1
 var boss_phase2 := false
@@ -246,6 +250,8 @@ func _ready() -> void:
 			die_at = float(a.substr(6))
 		if a.begins_with("--win="):
 			win_at = float(a.substr(6))
+		if a.begins_with("--bird="):
+			force_bird = a.substr(7)
 		if a.begins_with("--diff="):
 			force_diff = int(a.substr(7))
 		if a.begins_with("--enh="):
@@ -414,6 +420,8 @@ func start_run() -> void:
 		Diff.data(meta)["next"] = force_diff
 	diff = Diff.next_diff(meta)
 	zones.clear()
+	mines.clear()
+	tornados.clear()
 	boss_phase2 = false
 	_generate_room()
 	queue.clear()
@@ -432,7 +440,22 @@ func start_run() -> void:
 	meta_t = 0.0
 	paw["id"] = new_id()
 	hero = Hero.new(self)
-	hero.apply_meta(meta["parrot"]["up"], meta.get("quests", []), Meta.parrot_skills(meta))
+	var bird := Parrots.next_bird(meta)
+	if force_bird != "":
+		bird = force_bird
+		if not Parrots.owned(meta).has(bird):
+			Parrots.owned(meta).append(bird)
+	var skill_pool: Array = Meta.parrot_skills(meta)
+	if OS.get_cmdline_user_args().has("--allskills"):
+		skill_pool = []
+		for k in Skills.SKILLS:
+			if not Skills.BIRD_SKILLS.has(k):
+				skill_pool.append(k)
+	hero.apply_meta(meta["parrot"]["up"], meta.get("quests", []), skill_pool, bird, Parrots.perks(meta, bird))
+	for a2 in OS.get_cmdline_user_args():
+		if a2.begins_with("--forceskill="):
+			for k2 in a2.substr(13).split(","):
+				hero.skills[k2] = 3
 	hero.pos = floor_rect.get_center()
 	if hud != null:
 		hud.reset()
@@ -557,6 +580,7 @@ func _step(delta: float) -> void:
 	_update_missiles(delta)
 	_update_meteors(delta)
 	_update_zones(delta)
+	_update_mines(delta)
 	_update_delayed()
 	_update_pickups(delta)
 	_update_fx(delta)
@@ -1575,6 +1599,8 @@ func _update_enemies(delta: float) -> void:
 		if e.rush > 0.0:
 			e.rush -= delta
 			spd = maxf(spd, e.speed) * e.rush_k
+		if hero.bird == "cockatoo" and d < 1.6 * M and e.type != Enemy.T.BOSS:
+			spd *= 0.8
 		if spd > 0.0:
 			e.move_dir = dir
 		e.pos += (dir * spd + e.push_vel) * delta
@@ -1590,6 +1616,8 @@ func _update_enemies(delta: float) -> void:
 			if e.type != Enemy.T.HAND and e.type != Enemy.T.BOX and e.atk_cd <= 0.0 and not e.is_airborne() and e.tumble <= 0.0 and e.stun <= 0.0:
 				e.atk_cd = 0.9
 				hero.take_damage(e.dmg, ENAMES[e.type], src_label(e), e.from_player)
+				if hero.bperks.has("thorns"):
+					damage_enemy(e, 6.0, (e.pos - hero.pos).normalized() * 120.0, true, "thorns")
 			if d > 0.5 and e.type != Enemy.T.BOSS:
 				e.pos = hp_pos - dir * md
 
@@ -1934,9 +1962,20 @@ func _update_shots(delta: float) -> void:
 			if not ts.is_empty():
 				var want: Vector2 = (ts[0].pos - Vector2(s["pos"])).normalized() * v.length()
 				v = v.lerp(want, clampf(delta * 6.0, 0.0, 1.0))
+		if s.has("boomer") and time - float(s["born"]) > float(s["boomer"]) and not s.has("back"):
+			# бумеранг разворачивается и летит к попугаю, задевая всех снова
+			s["back"] = true
+			s["hit"] = []
+		if s.has("back"):
+			v = (hero.pos - Vector2(s["pos"])).normalized() * v.length()
+			if Vector2(s["pos"]).distance_to(hero.pos) < 20.0:
+				s["life"] = 0.0
+				continue
 		var np: Vector2 = s["pos"] + v * delta
 		s["life"] = float(s["life"]) - delta
-		if is_blocked(np):
+		if is_blocked(np) and s.has("boomer"):
+			pass
+		elif is_blocked(np):
 			if int(s["bounce"]) > 0:
 				s["bounce"] = int(s["bounce"]) - 1
 				var p: Vector2 = s["pos"]
@@ -1952,12 +1991,18 @@ func _update_shots(delta: float) -> void:
 				continue
 		s["pos"] = np
 		s["vel"] = v
-		for e in enemies_near(np, 30.0, 4):
+		var sr: float = s.get("r", 6.0)
+		var ssrc: String = s.get("src", "feather")
+		for e in enemies_near(np, 30.0 + sr, 6):
 			var hit: Array = s["hit"]
-			if hit.has(e.id) or np.distance_to(e.pos) > e.radius + 6.0:
+			if hit.has(e.id) or np.distance_to(e.pos) > e.radius + sr:
 				continue
 			hit.append(e.id)
-			damage_enemy(e, float(s["dmg"]), v.normalized() * 80.0, true, "feather")
+			damage_enemy(e, float(s["dmg"]), v.normalized() * 80.0, true, ssrc)
+			if ssrc == "crestfan":
+				hero.skill_hits += 1
+			if float(s.get("stun", 0.0)) > 0.0:
+				e.stun = maxf(e.stun, float(s["stun"]))
 			if s["ice"]:
 				e.slow = 1.5
 			s["pierce"] = int(s["pierce"]) - 1
@@ -2104,6 +2149,46 @@ func _add_zone(p: Vector2, r: float, kind: String, life: float) -> void:
 
 
 ## Пыль замедляет попугая, искры жгут. Кеша видит зоны и обходит их.
+func _update_mines(delta: float) -> void:
+	for m in mines:
+		m["t"] = float(m["t"]) + delta
+		if float(m["t"]) < 0.5:
+			continue
+		var mp: Vector2 = m["pos"]
+		if enemies_near(mp, 18.0, 1).is_empty():
+			continue
+		for e in enemies_near(mp, float(m["r"]), 999):
+			damage_enemy(e, float(m["dmg"]), (e.pos - mp).normalized() * 260.0, true, "mines")
+		if m["frag"]:
+			for j in 5:
+				shots.append({"pos": mp, "vel": Vector2.RIGHT.rotated(TAU * j / 5.0) * 8.0 * M, "dmg": float(m["dmg"]) * 0.3, "pierce": 2, "life": 0.5,
+					"hit": [], "bounce": 0, "homing": false, "ice": false, "src": "mines", "kind": "shard", "born": time})
+		add_fx({"kind": "poof", "pos": mp, "dur": 0.45, "col": Color("fff6e0"), "r": float(m["r"]) * 0.5})
+		add_fx({"kind": "ring", "pos": mp, "r": float(m["r"]), "dur": 0.3, "color": Color(1.0, 0.8, 0.4, 0.9)})
+		sfx("pop", -6.0, 0.7)
+		m["done"] = true
+	mines = mines.filter(func(m): return not m.has("done"))
+	for t in tornados:
+		t["t"] = float(t["t"]) + delta
+		var tp: Vector2 = t["pos"]
+		# бредёт к ближайшей толпе, не отходя далеко от попугая
+		var ts := enemies_near(tp, 4.0 * M, 1)
+		var want: Vector2 = Vector2(t["dir"])
+		if not ts.is_empty():
+			want = (ts[0].pos - tp).normalized()
+		if tp.distance_to(hero.pos) > 4.0 * M:
+			want = (hero.pos - tp).normalized()
+		t["dir"] = Vector2(t["dir"]).lerp(want, clampf(delta * 2.0, 0.0, 1.0)).normalized()
+		t["pos"] = resolve_circle(tp + Vector2(t["dir"]) * 1.6 * M * delta, 12.0)
+		for e in enemies_near(tp, 2.2 * M, 999):
+			var d: float = e.pos.distance_to(tp)
+			if not e.is_big():
+				e.push_vel += (tp - e.pos).normalized() * float(t["pull"]) * delta * 10.0
+			if d < 1.0 * M:
+				damage_enemy(e, float(t["dps"]) * delta, Vector2.ZERO, false, "tornado")
+	tornados = tornados.filter(func(t): return float(t["t"]) < float(t["life"]))
+
+
 func _update_zones(delta: float) -> void:
 	for z in zones:
 		z["t"] = float(z["t"]) + delta
@@ -2122,6 +2207,20 @@ func _update_delayed() -> void:
 		match d["kind"]:
 			"echo":
 				hero.scream_at(float(d["r"]), float(d["dmg"]))
+			"nut", "star":
+				var q: Vector2 = d["pos"]
+				for e in enemies_near(q, float(d["r"]), 999):
+					damage_enemy(e, float(d["dmg"]), (e.pos - q).normalized() * 160.0, true, "nut" if d["kind"] == "nut" and not d.has("book") else ("mimic" if d.has("book") else "stars"))
+					if float(d.get("stun", 0.0)) > 0.0:
+						e.stun = maxf(e.stun, float(d["stun"]))
+					if bool(d.get("burn", false)):
+						e.burn = 2.0
+						e.burn_dps = 3.0
+				add_fx({"kind": "dust" if d["kind"] == "nut" else "ring", "pos": q, "r": float(d["r"]), "dur": 0.4, "color": Color(1.0, 0.9, 0.4, 0.9)})
+				if d["kind"] == "nut":
+					sfx("thud", -12.0, 1.4)
+			"mimic":
+				hero.mimic_now(int(d["lvl"]), float(d["sk"]))
 			"book2":
 				# «Второй том»: туда, куда бежит Кеша
 				var q: Vector2 = (hero.pos + hero.vel * 0.8).clamp(floor_rect.position, floor_rect.end)
@@ -2426,8 +2525,9 @@ func on_fruit_eaten(f: String) -> void:
 	add_fx({"kind": "eat", "pos": hero.pos, "dur": 0.6, "fruit": f})
 	match f:
 		"apple":
-			hero.hp = minf(hero.max_hp(), hero.hp + 40.0)
-			add_text(hero.pos + Vector2(0, -50), "+40", Color("5a9a4a"), 22)
+			var heal := 40.0 + (20.0 if hero.bperks.has("fruit_love") else 0.0)
+			hero.hp = minf(hero.max_hp(), hero.hp + heal)
+			add_text(hero.pos + Vector2(0, -50), "+%d" % int(heal), Color("5a9a4a"), 22)
 		"chili":
 			var rr := 3.5 * M
 			for e in enemies_near(hero.pos, rr, 999):
@@ -2437,7 +2537,7 @@ func on_fruit_eaten(f: String) -> void:
 			add_fx({"kind": "fire", "pos": hero.pos, "r": rr, "dur": 0.6})
 			sfx("fire")
 		"carrot":
-			hero.speed_t = 5.0
+			hero.speed_t = 8.0 if hero.bperks.has("fruit_love") else 5.0
 		"grape":
 			hero.xp += hero.xp_next
 		"lemon":
@@ -2814,7 +2914,7 @@ func _sim_step() -> void:
 			"сломан" if boss_defeated else ("жив" if boss != null else "не появился"), hero.events_done, events_denied,
 			meteor_hits, meteors_cast, kills, hero.chests_opened])
 		print("УРОН ПО ГЕРОЮ: ", dmg_by_src)
-		print("ДАННЫЕ ", JSON.stringify({"over": over, "time": snappedf(time, 0.1), "level": hero.level, "boss_hp": (boss.hp / boss.max_hp if boss != null and not boss.dead else 0.0), "boss": boss_defeated, "skills": hero.skills, "mods": hero.mods.values(), "general": hero.general, "taken": dmg_by_src, "dealt": dealt_by_src, "events": hero.events_done, "events_total": events_total, "millet": run_millet, "feathers": save.get("feathers", 0), "up": meta["parrot"]["up"], "quests": hero.quests, "player_dmg": int(player_damage), "unlocked": meta["unlocked"].keys(), "hq": Trees.bought_total(meta), "diff": diff, "dunl": Diff.unlocked(meta), "enh": Trees.hq(meta)["enh"], "pskills": Meta.parrot_skills(meta), "plan": hero.plan, "kills": kills, "chests": hero.chests_opened, "fruits": fruits_eaten, "rams": rams, "hp_frac": hero.hp_frac(), "qall": _all_quests()}))
+		print("ДАННЫЕ ", JSON.stringify({"over": over, "time": snappedf(time, 0.1), "level": hero.level, "boss_hp": (boss.hp / boss.max_hp if boss != null and not boss.dead else 0.0), "boss": boss_defeated, "skills": hero.skills, "mods": hero.mods.values(), "general": hero.general, "taken": dmg_by_src, "dealt": dealt_by_src, "events": hero.events_done, "events_total": events_total, "millet": run_millet, "feathers": save.get("feathers", 0), "up": meta["parrot"]["up"], "quests": hero.quests, "player_dmg": int(player_damage), "unlocked": meta["unlocked"].keys(), "hq": Trees.bought_total(meta), "diff": diff, "dunl": Diff.unlocked(meta), "bird": hero.bird, "birds": Parrots.owned(meta).size(), "enh": Trees.hq(meta)["enh"], "pskills": Meta.parrot_skills(meta), "plan": hero.plan, "kills": kills, "chests": hero.chests_opened, "fruits": fruits_eaten, "rams": rams, "hp_frac": hero.hp_frac(), "qall": _all_quests()}))
 		get_tree().quit()
 
 
@@ -3203,7 +3303,10 @@ func _save_run(feathers: int) -> void:
 	last["ach_new"] = Meta.claim_achievements(meta)
 	last["diff"] = diff
 	last["diff_msg"] = Diff.record(meta, diff, boss_defeated, time)
+	last["bird"] = hero.bird
+	Parrots.record(meta, hero.bird, boss_defeated, time, kills, hero_dodges, hero.skill_hits)
 	Diff.choose(meta, hero.greed0)
+	Parrots.choose(meta)
 	last["bought"] = Meta.parrot_shop(meta, mem)
 	# квесты появляются только с третьего забега, чтобы не вываливать всё сразу
 	if int(save["runs"]) >= 2:

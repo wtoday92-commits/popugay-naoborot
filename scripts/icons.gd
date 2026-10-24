@@ -12,6 +12,19 @@ const BADGE := {
 	"scream_echo": "double", "scream_stun": "star", "scream_wide": "out", "scream_fast": "clock", "scream_fear": "bang",
 	"orbit_more": "plus", "orbit_fast": "clock", "orbit_wide": "out", "orbit_knock": "out", "orbit_fire": "flame",
 	"zap_chain": "zigzag", "zap_stun": "star", "zap_fork": "fan", "zap_fast": "clock", "zap_long": "long",
+	"seed_triple": "fan", "seed_pierce": "arrow", "seed_fast": "clock",
+	"boomer_two": "double", "boomer_wide": "out", "boomer_slow": "snow",
+	"gust_wide": "fan", "gust_far": "long", "gust_stun": "star",
+	"mines_more": "plus", "mines_big": "out", "mines_frag": "bang",
+	"song_heal": "plus", "song_wide": "out", "song_sleep": "star",
+	"nut_two": "double", "nut_big": "out", "nut_stun": "star",
+	"crest_more": "plus", "crest_fast": "clock", "crest_spiky": "bang",
+	"tornado_two": "double", "tornado_long": "clock", "tornado_pull": "in",
+	"stars_more": "plus", "stars_big": "out", "stars_burn": "flame",
+	"laser_chain": "zigzag", "laser_burn": "flame", "laser_long": "long",
+	"mimic_double": "double", "mimic_strong": "bang", "mimic_fast": "clock",
+	"crestfan_more": "plus", "crestfan_stun": "star", "crestfan_far": "long",
+	"boom_stun": "star", "boom_wide": "out", "boom_fast": "clock",
 }
 
 const BG := {
@@ -104,6 +117,60 @@ static func _glyph(ci: CanvasItem, key: String, c: Vector2, u: float, a: float) 
 			for k in 3:
 				var ang := TAU * k / 3.0 + 0.4
 				_blob(ci, c + Vector2(cos(ang), sin(ang)) * 13 * u, 5 * u, 5 * u, cols[k], a, w * 0.7)
+		"seed":
+			for k in 3:
+				var q := c + Vector2(-8 + k * 8, 4 - absf(k - 1) * 8) * u
+				_blob(ci, q, 3.5 * u, 6.0 * u, Color("3a2e28"), a, w * 0.7, 0.4)
+				ci.draw_line(q - Vector2(0, 4) * u, q + Vector2(0, 4) * u, Color("e8dcc0", a), w * 0.4)
+		"boomer":
+			ci.draw_arc(c, 13 * u, -2.6, 0.5, 12, Color(INK, 0.5 * a), w * 0.6)
+			_blob(ci, c + Vector2(-6, 4) * u, 5 * u, 13 * u, Color("8fd46a"), a, w, 0.9)
+			_blob(ci, c + Vector2(7, -5) * u, 5 * u, 11 * u, Color("8fd46a"), a, w, -0.6)
+		"gust":
+			for k in 3:
+				ci.draw_arc(c + Vector2(-10 + k * 4, -8 + k * 8) * u, 9 * u, -0.6, 1.4, 8, Color("6f9bb8", a), w)
+		"mines":
+			_blob(ci, c + Vector2(0, 3) * u, 13 * u, 9 * u, Color("fff6e0"), a, w)
+			ci.draw_polyline(_pts(c, u, [Vector2(-12, 1), Vector2(-6, -4), Vector2(0, 2), Vector2(6, -4), Vector2(12, 1)]), ink, w * 0.8)
+			ci.draw_circle(c + Vector2(0, -10) * u, 3 * u, Color("e8574a", a))
+		"song":
+			ci.draw_circle(c + Vector2(-6, 8) * u, 5 * u, Color("8a6fd0", a))
+			ci.draw_circle(c + Vector2(8, 5) * u, 5 * u, Color("8a6fd0", a))
+			ci.draw_line(c + Vector2(-2, 8) * u, c + Vector2(-2, -12) * u, ink, w)
+			ci.draw_line(c + Vector2(12, 5) * u, c + Vector2(12, -14) * u, ink, w)
+			ci.draw_line(c + Vector2(-2, -12) * u, c + Vector2(12, -14) * u, ink, w * 1.4)
+		"nut":
+			_blob(ci, c, 12 * u, 14 * u, Color("b07a4a"), a, w)
+			ci.draw_line(c + Vector2(0, -13) * u, c + Vector2(0, 13) * u, Color("7a4f2a", a), w * 0.7)
+		"crest":
+			_poly(ci, _pts(c, u, [Vector2(0, -15), Vector2(13, -6), Vector2(10, 10), Vector2(0, 15), Vector2(-10, 10), Vector2(-13, -6)]), Color("f2cf3a"), a, w)
+			for k in 3:
+				ci.draw_line(c + Vector2(-5 + k * 5, 4) * u, c + Vector2(-8 + k * 8, -10) * u, Color("b8941e", a), w * 0.6)
+		"tornado":
+			for k in 4:
+				ci.draw_arc(c + Vector2(sin(k) * 2.0, 10 - k * 7) * u, (4 + k * 3.5) * u, 0, PI * 1.5, 10, Color("6f9bb8", a), w)
+		"stars":
+			_star(ci, c + Vector2(-6, 4) * u, 9 * u, Color("ffe36a"), a)
+			_star(ci, c + Vector2(8, -7) * u, 6 * u, Color("ffe36a"), a)
+		"laser":
+			_blob(ci, c + Vector2(-6, 6) * u, 4 * u, 12 * u, Color("5a5a66"), a, w, 0.8)
+			ci.draw_line(c + Vector2(0, 0) * u, c + Vector2(13, -11) * u, Color("e8574a", a), w * 1.2)
+			ci.draw_circle(c + Vector2(13, -11) * u, 3.5 * u, Color("ff3a2a", a))
+		"mimic":
+			_blob(ci, c + Vector2(-4, 2) * u, 11 * u, 11 * u, Color("b8bcc0"), a, w)
+			ci.draw_arc(c + Vector2(8, -2) * u, 6 * u, -0.8, 0.8, 6, ink, w * 0.7)
+			ci.draw_arc(c + Vector2(8, -2) * u, 11 * u, -0.8, 0.8, 8, ink, w * 0.7)
+			_poly(ci, _pts(c, u, [Vector2(10, 6), Vector2(16, 12), Vector2(14, 14), Vector2(8, 10)]), Color("d23b2e"), a, w * 0.6)
+		"crestfan":
+			for k in 5:
+				var ang := -PI * 0.5 + (k - 2) * 0.32
+				var b := c + Vector2(0, 10) * u
+				var t := b + Vector2(cos(ang), sin(ang)) * 22.0 * u
+				_poly(ci, PackedVector2Array([b + Vector2(-2, 0) * u, t, b + Vector2(2, 0) * u]), Color("f2cf3a"), a, w * 0.6)
+		"boom":
+			_blob(ci, c, 8 * u, 8 * u, Color("8aa84a"), a, w)
+			for k in 2:
+				ci.draw_arc(c, (12 + k * 5) * u, 0, TAU, 20, Color("5f7a30", a * (0.8 - k * 0.3)), w * 0.8)
 		"zap":
 			_poly(ci, _pts(c, u, [Vector2(3, -16), Vector2(-9, 2), Vector2(-1, 2), Vector2(-5, 16), Vector2(9, -3), Vector2(1, -3)]), Color("f7d84a"), a, w)
 			ci.draw_arc(c, 15 * u, -2.4, -1.6, 6, Color("8fb6e8", a), w * 0.7)

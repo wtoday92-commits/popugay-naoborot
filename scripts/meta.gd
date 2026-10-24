@@ -194,7 +194,7 @@ static func parrot_shop(meta: Dictionary, memory: Dictionary) -> Array:
 	elif float(taken.get("boss", 0.0)) > 0.25:
 		order = ["dmg", "hp", "start", "luck", "speed", "armor", "xp", "regen", "magnet", "eye", "dodge"]
 	var guard := 0
-	while guard < 40:
+	while guard < 60:
 		guard += 1
 		var stage := parrot_stage(meta)
 		# новое умение за просо — первым делом, как только хватает
@@ -206,26 +206,46 @@ static func parrot_shop(meta: Dictionary, memory: Dictionary) -> Array:
 				p["skills"].append(sk["key"])
 				bought.append("умение «%s»" % sk["name"])
 				any = true
+		if any:
+			continue
+		# общий пункт: первый по приоритету, который ещё не на максимуме
+		var gen: Dictionary = {}
+		var gen_cost := 1 << 30
 		for k in order:
-			if any:
-				break
 			var item: Dictionary = {}
 			for it in PARROT:
 				if it["key"] == k:
 					item = it
-			if int(item["stage"]) > stage:
+			if int(item["stage"]) > stage or int(ups.get(k, 0)) >= int(item["max"]):
 				continue
-			var lvl := int(ups.get(k, 0))
-			if lvl >= int(item["max"]):
-				continue
-			var cost := up_cost(item, lvl)
-			if int(p["bank"]) >= cost:
-				p["bank"] = int(p["bank"]) - cost
-				p["spent"] = int(p.get("spent", 0)) + cost
-				ups[k] = lvl + 1
-				bought.append("%s ур. %d" % [item["name"], lvl + 1])
-				any = true
-				break
-		if not any:
+			gen = item
+			gen_cost = up_cost(item, int(ups.get(k, 0)))
 			break
+		# узел дерева попугая, за которого он пойдёт следующим (остальные — дороже по приоритету)
+		var nb := Parrots.next_bird(meta)
+		var node_pick := []
+		var node_w := 1 << 30
+		for b in Parrots.owned(meta):
+			var bn := Parrots.best_node(meta, b)
+			if bn.is_empty():
+				continue
+			var w := int(float(bn[2]) * (1.0 if b == nb else 1.6))
+			if w < node_w:
+				node_w = w
+				node_pick = [b, bn[0], bn[1], bn[2]]
+		if not node_pick.is_empty() and node_w < gen_cost and int(p["bank"]) >= int(node_pick[3]):
+			var id := Parrots.node_id(node_pick[0], node_pick[1], node_pick[2])
+			p["bank"] = int(p["bank"]) - int(node_pick[3])
+			p["spent"] = int(p.get("spent", 0)) + int(node_pick[3])
+			Parrots.data(meta)["nodes"][id] = Parrots.lvl(meta, id) + 1
+			bought.append("%s: %s" % [Parrots.bird(node_pick[0])["name"], Parrots.node(node_pick[0], node_pick[1], node_pick[2])[0]])
+			continue
+		if not gen.is_empty() and int(p["bank"]) >= gen_cost:
+			var lvl := int(ups.get(gen["key"], 0))
+			p["bank"] = int(p["bank"]) - gen_cost
+			p["spent"] = int(p.get("spent", 0)) + gen_cost
+			ups[gen["key"]] = lvl + 1
+			bought.append("%s ур. %d" % [gen["name"], lvl + 1])
+			continue
+		break
 	return bought

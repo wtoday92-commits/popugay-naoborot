@@ -35,6 +35,14 @@ var horde_mark_t := 0.0
 var horde_mark_k := 0.3
 var rot_left := 0
 var _xp_frac := 0.0
+## Какой это попугай и его дерево прокачки.
+var bird := "budgie"
+var bperks := {}
+var second_used := false
+var laser_pts: Array = []
+var last_tools: Array = []
+var skill_hits := 0
+var song_tick := 0
 
 var game
 var pos := Vector2.ZERO
@@ -239,17 +247,29 @@ func has_mod(k: String) -> bool:
 	return mods.values().has(k)
 
 
+func bp(k: String) -> float:
+	return float(bperks.get(k, 0.0))
+
+
+func bdat(k: String) -> float:
+	return float(Parrots.bird(bird)[k])
+
+
 func max_hp() -> float:
-	return 110.0 + 15.0 * int(meta_up.get("hp", 0)) + 20.0 * lvl_of("fluff")
+	return (110.0 + 15.0 * int(meta_up.get("hp", 0)) + 20.0 * lvl_of("fluff")) * bdat("hp") * (1.0 + bp("hp_pct"))
 
 
 func speed() -> float:
-	return 3.0 * M * (1.0 + 0.05 * int(meta_up.get("speed", 0)) + 0.1 * lvl_of("wings")) * (1.5 if speed_t > 0.0 else 1.0) * (1.0 - slow_k if slow_t > 0.0 else 1.0)
+	return 3.0 * M * bdat("speed") * (1.0 + 0.05 * int(meta_up.get("speed", 0)) + 0.1 * lvl_of("wings") + bp("speed_pct")) * (1.5 if speed_t > 0.0 else 1.0) * (1.0 - slow_k if slow_t > 0.0 else 1.0)
 
 
 func dmg_mult() -> float:
-	var m := 1.08 + 0.1 * int(meta_up.get("dmg", 0)) + 0.1 * lvl_of("beak")
-	if randf() < 0.08 * lvl_of("luck") + 0.03 * int(meta_up.get("luck", 0)):
+	var m := (1.08 + 0.1 * int(meta_up.get("dmg", 0)) + 0.1 * lvl_of("beak")) * (1.0 + bp("dmg_pct"))
+	if hp_frac() < 0.3 and bperks.has("berserk"):
+		m *= 1.4
+	if bird == "cockatoo" and hp_frac() < 0.4:
+		m *= 1.3
+	if randf() < 0.08 * lvl_of("luck") + 0.03 * int(meta_up.get("luck", 0)) + bp("crit") + (0.1 if bperks.has("lucky") else 0.0):
 		m *= 2.0
 	return m
 
@@ -260,13 +280,15 @@ func armor() -> float:
 
 ## Опыт с учётом «Прилежания»; дробная часть копится.
 func gain_xp(n: int) -> void:
-	var f := float(n) * (1.0 + 0.06 * int(meta_up.get("xp", 0))) + _xp_frac
+	var f := float(n) * (1.0 + 0.06 * int(meta_up.get("xp", 0)) + bp("xp_pct")) + _xp_frac
 	xp += int(f)
 	_xp_frac = f - floorf(f)
 
 
 func dodge_bonus() -> float:
-	return 0.05 * int(meta_up.get("dodge", 0))
+	if bdat("dodge") <= 0.0:
+		return -1.0
+	return (0.05 * int(meta_up.get("dodge", 0)) + bp("dodge") + (0.15 if bperks.has("evasion") else 0.0)) * bdat("dodge")
 
 
 ## Замедление: берётся сильнейшее из действующих.
@@ -309,7 +331,7 @@ func _update_dots(delta: float) -> void:
 
 
 func magnet() -> float:
-	return 1.6 * M * (1.0 + 0.15 * int(meta_up.get("magnet", 0)) + 0.3 * lvl_of("magnet"))
+	return 1.6 * M * (1.0 + 0.15 * int(meta_up.get("magnet", 0)) + 0.3 * lvl_of("magnet") + bp("magnet_pct"))
 
 
 func hp_frac() -> float:
@@ -380,7 +402,7 @@ func update(delta: float) -> void:
 	speed_t = maxf(0.0, speed_t - delta)
 	fruit_cd = maxf(0.0, fruit_cd - delta)
 	eat_t = maxf(0.0, eat_t - delta)
-	hp = minf(max_hp(), hp + (0.5 + 0.25 * int(meta_up.get("regen", 0))) * delta)
+	hp = minf(max_hp(), hp + (0.5 + 0.25 * int(meta_up.get("regen", 0)) + bp("regen")) * delta)
 	_update_dots(delta)
 	for k in wariness:
 		wariness[k] = maxf(0.0, float(wariness[k]) - 0.01 * delta)
@@ -530,7 +552,9 @@ func _notice_meteors() -> void:
 		var p: Vector2 = m["pos"]
 		var ft: float = m["focus_t"]
 		var ok := false
-		var late: float = m.get("hide", 0.0)
+		var late: float = m.get("hide", 0.0) - bdat("notice")
+		if bperks.has("foresight"):
+			late = -1.0
 		if t < float(m["born"]) + float(m.get("hidden", 0.0)):
 			continue
 		if ft >= 0.0 and t >= ft + 0.3 + late:
@@ -1162,6 +1186,8 @@ func _weapons(delta: float) -> void:
 			peck_dir = (e.pos - pos).normalized()
 			peck_t = 0.18
 			game.damage_enemy(e, 10.0 * dmg_mult(), peck_dir * 140.0, true, "peck")
+			if bperks.has("vamp"):
+				hp = minf(max_hp(), hp + 1.0)
 			game.add_fx({"kind": "peck", "pos": pos, "to": e.pos, "dur": 0.2})
 			game.sfx("peck", -6.0, randf_range(0.9, 1.15))
 			cds["peck"] = 0.45
@@ -1222,6 +1248,8 @@ func _weapons(delta: float) -> void:
 				if has_mod("mirror_double"):
 					_beam(pos, -dir, dmg)
 				cds[k] = 2.4 - 0.25 * lvl
+			"seed", "boomer", "gust", "mines", "song", "nut", "crest", "tornado", "stars", "laser", "mimic", "crestfan", "boom":
+				cds[k] = _new_skill(k, lvl)
 			"zap":
 				var ts: Array = game.enemies_near(pos, 3.2 * M, 1)
 				if ts.is_empty():
@@ -1271,6 +1299,220 @@ func _beam(from: Vector2, dir: Vector2, dmg: float) -> void:
 			hit.append(picked)
 			cur = picked
 	game.sfx("chime", -16.0, 2.0)
+
+
+func _shot(dir: Vector2, spd: float, dmg: float, pierce: int, life: float, src: String, extra: Dictionary = {}) -> void:
+	var sh := {"pos": pos, "vel": dir * spd, "dmg": dmg, "pierce": pierce, "life": life, "hit": [], "bounce": 0,
+		"homing": false, "ice": false, "src": src, "born": game.time}
+	sh.merge(extra)
+	game.shots.append(sh)
+
+
+## Плотнее всего толпа: из нескольких ближайших врагов берём того, у кого больше соседей.
+func _densest(r: float, n: int) -> Enemy:
+	var ts: Array = game.enemies_near(pos, r, n)
+	var best: Enemy = null
+	var bc := -1
+	for e in ts:
+		var c: int = game.enemies_near(e.pos, 1.5 * M, 12).size()
+		if c > bc:
+			bc = c
+			best = e
+	return best
+
+
+## Новые умения. Возвращает откат до следующего срабатывания.
+func _new_skill(k: String, lvl: int) -> float:
+	var dm := dmg_mult()
+	var sk := 1.0 + bp("skill_pct")
+	var scd := 1.0 - bp("skill_cd")
+	match k:
+		"seed":
+			var ts: Array = game.enemies_near(pos, 6.0 * M, 1)
+			if ts.is_empty():
+				return 0.2
+			var base: Vector2 = (ts[0].pos - pos).normalized()
+			var n := 3 if has_mod("seed_triple") else 1
+			for j in n:
+				_shot(base.rotated((float(j) - float(n - 1) * 0.5) * 0.22), 11.0 * M, (3.0 + 1.5 * lvl) * dm, 1 + (2 if has_mod("seed_pierce") else 0), 0.8, "seed", {"kind": "seed"})
+			return (0.45 - 0.03 * lvl) * (0.6 if has_mod("seed_fast") else 1.0)
+		"boomer":
+			var ts: Array = game.enemies_near(pos, 6.0 * M, 1)
+			if ts.is_empty():
+				return 0.2
+			var base: Vector2 = (ts[0].pos - pos).normalized()
+			for j in (2 if has_mod("boomer_two") else 1):
+				_shot(base.rotated(j * PI), 8.0 * M, (4.0 + 2.0 * lvl) * dm, 99, 1.6, "boomer",
+					{"kind": "boomer", "boomer": 0.55, "r": 14.0 * (1.6 if has_mod("boomer_wide") else 1.0), "ice": has_mod("boomer_slow")})
+			return 1.8 - 0.1 * lvl
+		"gust":
+			var dir := heading
+			var ts: Array = game.enemies_near(pos, 3.0 * M, 1)
+			if not ts.is_empty():
+				dir = (ts[0].pos - pos).normalized()
+			var half := deg_to_rad(50.0 + (22.0 if has_mod("gust_wide") else 0.0))
+			var rr := 3.0 * M * (1.5 if has_mod("gust_far") else 1.0)
+			for e in game.enemies_near(pos, rr, 999):
+				var to: Vector2 = e.pos - pos
+				if absf(dir.angle_to(to)) <= half:
+					game.damage_enemy(e, (5.0 + 2.0 * lvl) * dm, to.normalized() * 300.0, true, "gust")
+					if has_mod("gust_stun"):
+						e.stun = maxf(e.stun, 0.4)
+			game.add_fx({"kind": "gust", "pos": pos, "dir": dir, "half": half, "r": rr, "dur": 0.3})
+			return 2.2 - 0.15 * lvl
+		"mines":
+			var mx := 4 + int(lvl / 2) + (3 if has_mod("mines_more") else 0)
+			if game.mines.size() < mx:
+				game.mines.append({"id": game.new_id(), "pos": pos + Vector2(randf_range(-6, 6), 10), "t": 0.0,
+					"r": 1.4 * M * (1.5 if has_mod("mines_big") else 1.0), "dmg": (12.0 + 5.0 * lvl) * dm, "frag": has_mod("mines_frag")})
+			return 1.6 - 0.1 * lvl
+		"song":
+			song_tick += 1
+			var rr := (2.0 + 0.2 * lvl) * M * (1.4 if has_mod("song_wide") else 1.0)
+			var sleep := has_mod("song_sleep") and song_tick % 10 == 0
+			for e in game.enemies_near(pos, rr, 999):
+				e.slow = maxf(e.slow, 0.6)
+				game.damage_enemy(e, (1.6 + 0.9 * lvl) * dm, Vector2.ZERO, false, "song")
+				if sleep:
+					e.stun = maxf(e.stun, 0.8)
+			if has_mod("song_heal"):
+				hp = minf(max_hp(), hp + 0.5)
+			if song_tick % 3 == 0 or sleep:
+				game.add_fx({"kind": "notes", "pos": pos, "r": rr, "dur": 0.8, "big": sleep})
+			return 0.5
+		"nut":
+			var tgt := _densest(7.0 * M, 8)
+			if tgt == null:
+				return 0.3
+			var targets: Array = [tgt.pos]
+			if has_mod("nut_two"):
+				var ex: Array = game.enemies_near(pos, 7.0 * M, 6)
+				if ex.size() > 1:
+					targets.append(ex[randi() % ex.size()].pos)
+			for tp in targets:
+				game.delayed.append({"at": game.time + 0.6, "kind": "nut", "pos": tp, "r": 1.6 * M * (1.5 if has_mod("nut_big") else 1.0),
+					"dmg": (15.0 + 7.0 * lvl) * dm, "stun": 0.8 if has_mod("nut_stun") else 0.0})
+				game.add_fx({"kind": "lob", "pos": pos, "to": tp, "dur": 0.6, "what": "nut"})
+			return 2.6 - 0.15 * lvl
+		"crest":
+			var mx := 1 + int(lvl / 3) + (1 if has_mod("crest_more") else 0)
+			if shield_hits < mx:
+				shield_hits += 1
+				game.add_fx({"kind": "ring", "pos": pos, "r": 30.0, "dur": 0.3, "color": Color(0.95, 0.85, 0.2, 0.9)})
+			return (9.0 - 0.8 * lvl) * (0.65 if has_mod("crest_fast") else 1.0)
+		"tornado":
+			for j in (2 if has_mod("tornado_two") else 1):
+				game.tornados.append({"id": game.new_id(), "pos": pos + Vector2.RIGHT.rotated(randf() * TAU) * 1.5 * M, "t": 0.0,
+					"life": 4.0 + (3.0 if has_mod("tornado_long") else 0.0), "dps": (4.0 + 2.0 * lvl) * dm,
+					"pull": 60.0 * (2.5 if has_mod("tornado_pull") else 1.0), "dir": Vector2.RIGHT.rotated(randf() * TAU)})
+			return 5.0 - 0.3 * lvl
+		"stars":
+			var ts: Array = game.enemies_near(pos, 6.0 * M, 12)
+			if ts.is_empty():
+				return 0.3
+			var n := 2 + int(lvl / 2) + (2 if has_mod("stars_more") else 0)
+			for j in n:
+				var e: Enemy = ts[randi() % ts.size()]
+				game.delayed.append({"at": game.time + 0.4, "kind": "star", "pos": e.pos, "r": 0.8 * M * (1.5 if has_mod("stars_big") else 1.0),
+					"dmg": (6.0 + 2.5 * lvl) * dm, "burn": has_mod("stars_burn")})
+				game.add_fx({"kind": "starfall", "pos": e.pos, "dur": 0.4})
+			return 1.8 - 0.1 * lvl
+		"laser":
+			var reach := (5.0 + (3.0 if has_mod("laser_long") else 0.0)) * M
+			var ts: Array = game.enemies_near(pos, reach, 1)
+			laser_pts = []
+			if ts.is_empty():
+				return 0.1
+			var t1: Enemy = ts[0]
+			var dps := (10.0 + 5.0 * lvl) * dm
+			game.damage_enemy(t1, dps * 0.1, Vector2.ZERO, false, "laser")
+			laser_pts = [t1.pos]
+			if has_mod("laser_burn"):
+				t1.burn = 1.0
+				t1.burn_dps = 3.0
+			if has_mod("laser_chain"):
+				for c in game.enemies_near(t1.pos, 2.5 * M, 3):
+					if c != t1:
+						game.damage_enemy(c, dps * 0.06, Vector2.ZERO, false, "laser")
+						laser_pts.append(c.pos)
+						break
+			return 0.1
+		"mimic":
+			_mimic(lvl, sk)
+			if has_mod("mimic_double"):
+				game.delayed.append({"at": game.time + 0.4, "kind": "mimic", "lvl": lvl, "sk": sk})
+			return 4.0 * scd * (0.65 if has_mod("mimic_fast") else 1.0)
+		"crestfan":
+			var dir := heading
+			var ts: Array = game.enemies_near(pos, 6.0 * M, 1)
+			if not ts.is_empty():
+				dir = (ts[0].pos - pos).normalized()
+			var n := 5 + (4 if has_mod("crestfan_more") else 0)
+			for j in n:
+				_shot(dir.rotated((float(j) - float(n - 1) * 0.5) * 0.16), 9.0 * M, (5.0 + 2.5 * lvl) * dm * sk, 2,
+					1.3 if has_mod("crestfan_far") else 0.8, "crestfan", {"kind": "crest", "stun": 0.3 if has_mod("crestfan_stun") else 0.0})
+			return (4.0 - 0.2 * lvl) * scd
+		"boom":
+			var rr := 3.0 * M * (1.4 if has_mod("boom_wide") else 1.0)
+			for e in game.enemies_near(pos, rr, 999):
+				game.damage_enemy(e, (6.0 + 3.0 * lvl) * dm * sk, (e.pos - pos).normalized() * 380.0, true, "boom")
+				skill_hits += 1
+				if has_mod("boom_stun"):
+					e.stun = maxf(e.stun, 0.6)
+			game.add_fx({"kind": "ring", "pos": pos, "r": rr, "dur": 0.45, "color": Color(0.55, 0.7, 0.3, 0.9)})
+			game.add_fx({"kind": "ring", "pos": pos, "r": rr * 0.6, "dur": 0.35, "color": Color(0.55, 0.7, 0.3, 0.6)})
+			game.sfx("thud", -10.0, 0.5)
+			game.shake = maxf(game.shake, 2.0)
+			return (3.0 - 0.15 * lvl) * scd * (0.65 if has_mod("boom_fast") else 1.0)
+	return 1.0
+
+
+## Передразнивание Жако: ваш последний трюк — против орды.
+func mimic_now(lvl: int, sk: float) -> void:
+	_mimic(lvl, sk)
+
+
+func _mimic(lvl: int, sk: float) -> void:
+	var tool: String = last_tools[0] if last_tools.size() > 0 else ""
+	var pw := (1.6 + 0.4 * lvl) * sk * (1.5 if has_mod("mimic_strong") else 1.0) * dmg_mult()
+	var tgt := _densest(6.0 * M, 8)
+	skill_hits += 1
+	match tool:
+		"throw":
+			if tgt != null:
+				for j in 3:
+					_shot((tgt.pos - pos).normalized().rotated((j - 1) * 0.15), 12.0 * M, 12.0 * pw, 3, 1.0, "mimic", {"kind": "sock"})
+			say("Носком тебя! Ха.")
+		"book":
+			if tgt != null:
+				game.delayed.append({"at": game.time + 0.5, "kind": "nut", "pos": tgt.pos, "r": 2.0 * M, "dmg": 22.0 * pw, "stun": 1.0, "book": true})
+				game.add_fx({"kind": "lob", "pos": pos, "to": tgt.pos, "dur": 0.5, "what": "book"})
+			say("Книжкой! Как вы.")
+		"millet", "cage":
+			for e in game.enemies_near(pos, 2.5 * M, 999):
+				e.stun = maxf(e.stun, 1.2)
+				game.damage_enemy(e, 4.0 * pw, Vector2.ZERO, true, "mimic")
+			game.add_fx({"kind": "ring", "pos": pos, "r": 2.5 * M, "dur": 0.4, "color": Color(0.42, 0.31, 0.7, 0.8)})
+			say("Капкан! Капкан!")
+		"ram":
+			for e in game.enemies_near(pos, 2.5 * M, 999):
+				game.damage_enemy(e, 10.0 * pw, (e.pos - pos).normalized() * 420.0, true, "mimic")
+			game.add_fx({"kind": "ring", "pos": pos, "r": 2.5 * M, "dur": 0.4, "color": Color(0.9, 0.9, 0.95, 0.9)})
+			say("Лапкой! Бац!")
+		_:
+			for e in game.enemies_near(pos, 2.0 * M, 999):
+				game.damage_enemy(e, 6.0 * pw, (e.pos - pos).normalized() * 200.0, true, "mimic")
+			game.add_fx({"kind": "ring", "pos": pos, "r": 2.0 * M, "dur": 0.35, "color": Color(0.7, 0.7, 0.75, 0.8)})
+
+
+## Хохолок-щит: поглотил удар — вспышка отбрасывает и ранит всех рядом.
+func _crest_burst() -> void:
+	var lvl := lvl_of("crest")
+	var spiky := has_mod("crest_spiky")
+	var rr := 2.0 * M * (1.5 if spiky else 1.0)
+	for e in game.enemies_near(pos, rr, 999):
+		game.damage_enemy(e, (6.0 + 3.0 * lvl) * dmg_mult() * (2.0 if spiky else 1.0), (e.pos - pos).normalized() * 320.0, true, "crest")
+	game.add_fx({"kind": "ring", "pos": pos, "r": rr, "dur": 0.35, "color": Color(0.95, 0.85, 0.2, 0.9)})
 
 
 ## Искра: статический разряд с пуха прыгает от врага к врагу, каждый следующий — чуть слабее.
@@ -1388,13 +1630,21 @@ func _pickups(delta: float) -> void:
 func take_damage(amount: float, src: String, label: String, from_player: bool) -> void:
 	if game.over != "":
 		return
-	if shield_hits > 0 and src != "rotten":
+	if shield_hits > 0 and src != "rotten" and src != "dot":
 		shield_hits -= 1
 		game.add_text(pos + Vector2(0, -50), "щит!", Color("c9b52a"), 18)
+		if skills.has("crest"):
+			_crest_burst()
 		return
 	var a := amount if src == "meteor" or src == "rotten" or src == "dot" else maxf(1.0, amount - armor())
-	a *= 1.0 - 0.04 * int(meta_up.get("armor", 0))
+	a *= (1.0 - 0.04 * int(meta_up.get("armor", 0))) * (1.0 - bp("armor_pct"))
 	var mine := from_player or ["meteor", "paw", "throw", "missile", "rotten", "trap", "dot"].has(src)
+	if mine and bperks.has("iron"):
+		a *= 0.75
+	if mine and ["meteor", "paw", "throw", "missile", "rotten", "trap"].has(src):
+		var tool: String = {"meteor": "book", "paw": "ram", "throw": "throw", "missile": "millet", "rotten": "millet", "trap": "cage"}[src]
+		last_tools.erase(tool)
+		last_tools.push_front(tool)
 	if mine and mark_t > 0.0:
 		a *= 1.25
 	elif not mine and horde_mark_t > 0.0:
@@ -1405,6 +1655,15 @@ func take_damage(amount: float, src: String, label: String, from_player: bool) -
 	hurt = 0.2
 	dmg_log.append([game.time, src, a])
 	game.on_hero_damaged(a, src, label, from_player)
+	if hp <= 0.0 and bperks.has("second_wind") and not second_used:
+		# «Второй шанс»: раз за забег встаёт с 35% здоровья
+		second_used = true
+		hp = max_hp() * 0.35
+		ram_immune = 1.0
+		say("Ещё не конец!")
+		game.add_fx({"kind": "ring", "pos": pos, "r": 3.0 * M, "dur": 0.6, "color": Color(1.0, 0.85, 0.3, 0.9)})
+		game.banner("%s встаёт снова!" % String(Parrots.bird(bird)["name"]), Color("b07a1e"), 30, 2.0)
+		return
 	if hp <= 0.0:
 		hp = 0.0
 		game.hero_died()
@@ -1413,7 +1672,7 @@ func take_damage(amount: float, src: String, label: String, from_player: bool) -
 func rammed(dir: Vector2) -> void:
 	stun = 0.5
 	ram_immune = 1.5
-	knock_vel = dir * 8.0 * M
+	knock_vel = dir * 8.0 * M * bdat("knock")
 	opening = 0.0
 	opening_chest = null
 	stress = minf(1.0, stress + 0.15)
@@ -1434,7 +1693,7 @@ func dodge_paw(dir: Vector2) -> void:
 
 ## Летящий носок: увернуться можно, только если он в одном из слотов внимания.
 func try_dodge_throw(id: int, v: Vector2) -> bool:
-	if not focus_ids.has(id) or stun > 0.0 or held > 0.0 or trapped > 0.0:
+	if not focus_ids.has(id) or stun > 0.0 or held > 0.0 or trapped > 0.0 or bdat("dodge") <= 0.0:
 		return false
 	# в панике летящий носок легко прозевать
 	var chance := clampf(0.75 - 0.9 * stress + float(wariness["throw"]) + 0.2 * learned_alert("throw") + dodge_bonus() - game.pk("throw_sneak"), 0.05, 0.85)
@@ -1459,7 +1718,7 @@ func grabbed(e: Enemy) -> void:
 
 
 func knocked(dir: Vector2, power: float, stun_t: float) -> void:
-	knock_vel = dir * power
+	knock_vel = dir * power * bdat("knock")
 	stun = maxf(stun, stun_t)
 
 
@@ -1530,12 +1789,19 @@ func score_card(card: Dictionary) -> Dictionary:
 
 
 ## Прокачка из меты и квесты на забег.
-func apply_meta(ups: Dictionary, qs: Array, skill_pool: Array = []) -> void:
+func apply_meta(ups: Dictionary, qs: Array, skill_pool: Array = [], bird_key: String = "budgie", bird_perks: Dictionary = {}) -> void:
 	meta_up = ups
+	bird = bird_key
+	bperks = bird_perks
 	if skill_pool.size() > 0:
 		pool = skill_pool.duplicate()
+	var own: String = Parrots.bird(bird)["skill"]
+	if own != "" and not pool.has(own):
+		pool.append(own)
+	if own != "" and (bperks.has("innate") or bperks.has("master")):
+		skills[own] = 3 if bperks.has("master") else 1
 	quests = qs.duplicate()
-	slots = 3 + int(ups.get("eye", 0))
+	slots = 3 + int(ups.get("eye", 0)) + int(bdat("slots")) + (1 if bperks.has("focus") else 0)
 	hp = max_hp()
 	var start := int(ups.get("start", 0))
 	for i in start:
@@ -1545,6 +1811,8 @@ func apply_meta(ups: Dictionary, qs: Array, skill_pool: Array = []) -> void:
 func consume_level() -> void:
 	xp = maxi(0, xp - xp_next)
 	level += 1
+	if bperks.has("rally"):
+		speed_t = maxf(speed_t, 3.0)
 	xp_next = 6 * level - 2
 
 

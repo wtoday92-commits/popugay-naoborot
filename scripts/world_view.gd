@@ -53,6 +53,10 @@ func _draw() -> void:
 		Icons.draw(self, f["fruit"], fp - Vector2(0, hop), 34.0, clampf(float(f["life"]) / 2.0, 0.3, 1.0), false)
 	for z in game.zones:
 		_draw_zone(z, fr)
+	for m in game.mines:
+		_draw_mine(m)
+	for t in game.tornados:
+		_draw_tornado(t)
 	_draw_aura()
 	for f in game.fx:
 		if f["kind"] == "burnline":
@@ -84,11 +88,8 @@ func _draw() -> void:
 		if gt != null:
 			draw_arc(gt.pos, gt.radius + 9.0, 0, TAU, 24, Color(0.42, 0.31, 0.7, 0.9), 3.0, true)
 	for s in game.shots:
-		var p: Vector2 = s["pos"]
-		var d: Vector2 = Vector2(s["vel"]).normalized()
-		draw_line(p - d * 26.0, p - d * 8.0, Color(1, 1, 1, 0.5), 5.0, true)
-		Art.blob(self, p, 5.5, 13.0, Color("bfe3f5") if s["ice"] else Color("8fd46a"), 2.5, int(p.x) % 7, d.angle() + PI * 0.5)
-		draw_line(p - d * 12.0, p + d * 12.0, Color("2f5e33"), 1.5, true)
+		_draw_shot(s)
+	_draw_laser()
 	for s in game.enemy_shots:
 		var p: Vector2 = s["pos"]
 		Art.blob(self, p, 13.0, 10.0, Color(0.72, 0.86, 0.95, 0.75), 2.0, int(s["id"]) + fr, 0.0, Color("6f9bb8"))
@@ -666,12 +667,15 @@ func _draw_hero(fr: int) -> void:
 		Art.fill_blob(self, p + Vector2(0, 18), 19, 6, Color(0, 0, 0, 0.14))
 	if h.trapped > 0.0:
 		_draw_trap(p + Vector2(0, 12), 1.0 - h.trapped)
-	draw_set_transform(p * (1.0 - HERO_SCALE), 0.0, Vector2(HERO_SCALE, HERO_SCALE))
+	var bd: Dictionary = Parrots.bird(h.bird)
+	var col: Dictionary = bd["col"]
+	var hs: float = HERO_SCALE * float(bd["scale"])
+	draw_set_transform(p * (1.0 - hs), 0.0, Vector2(hs, hs))
 	Art.fill_blob(self, c + Vector2(2 * face, -6), 28.0 * puff, 27.0 * puff, Color(1, 0.99, 0.94, 0.9), sd)
 	if h.shield_hits > 0:
 		draw_arc(c + Vector2(0, -4), 29.0, 0, TAU, 24, Color(0.95, 0.85, 0.2, 0.8), 3.0, true)
 	var hurt := h.hurt > 0.0
-	var green := Color("79c85f").lerp(Color.WHITE, 0.5) if hurt else Color("79c85f")
+	var green: Color = Color(col["body"]).lerp(Color.WHITE, 0.5) if hurt else col["body"]
 	# хвост: два длинных пера
 	var sway := sin(_time * 5.0) * 0.12
 	for k in 2:
@@ -680,41 +684,66 @@ func _draw_hero(fr: int) -> void:
 		var tip := root + dir * (26.0 - k * 4.0)
 		var nrm := Vector2(-dir.y, dir.x) * 4.0
 		var tail := PackedVector2Array([root + nrm, tip, root - nrm])
-		draw_colored_polygon(tail, Color("2f6e6a") if k == 0 else Color("3f8f7a"))
+		draw_colored_polygon(tail, col["tail1"] if k == 0 else col["tail2"])
 		Art.outline(self, tail, INK, 3.0)
 	# лапки
 	if not flying:
 		for k in 2:
 			var fp := c + Vector2(-3 + k * 8, 17)
-			draw_line(fp, fp + Vector2(face * 4, 2), Color("e58a9a"), 3.0)
-			draw_line(fp, fp + Vector2(-face * 2, 3), Color("e58a9a"), 3.0)
+			draw_line(fp, fp + Vector2(face * 4, 2), col["feet"], 3.0)
+			draw_line(fp, fp + Vector2(-face * 2, 3), col["feet"], 3.0)
 	# тельце-груша и светлое брюшко
 	Art.blob(self, c + Vector2(-2 * face, 5), 16.0 * puff * squash, 14.0 * puff / squash, green, 4.0, sd)
-	Art.fill_blob(self, c + Vector2(3 * face, 9), 8.0 * puff, 7.0 * puff, Color("a8dd8c"), sd + 9)
+	Art.fill_blob(self, c + Vector2(3 * face, 9), 8.0 * puff, 7.0 * puff, col["belly"], sd + 9)
+	if col.has("spots"):
+		# какапо: моховые пятнышки
+		for k in 6:
+			Art.fill_blob(self, c + Vector2(-10 + (k % 3) * 7, -2 + int(k / 3) * 8) * Vector2(face, 1), 2.2, 1.6, col["spots"], k)
 	# крыло с волнистыми полосками; в полёте — машет
 	var flap := sin(_time * 22.0) if flying else (sin(h.bob * 2.0) * 0.4 if h.speed_t > 0.0 else 0.0)
 	var wing_c := c + Vector2(-6 * face, 3 - flap * 6.0)
 	var wing_rot := (-0.35 - flap * 0.8) * face
-	Art.blob(self, wing_c, 11.0, 7.5 + absf(flap) * 3.0, Color("4f9a45"), 3.0, sd + 2, wing_rot)
+	Art.blob(self, wing_c, 11.0, 7.5 + absf(flap) * 3.0, col["wing"], 3.0, sd + 2, wing_rot)
 	for k in 3:
-		draw_arc(wing_c + Vector2(-4 + k * 4, -1 + k * 1.5).rotated(wing_rot), 3.5, 0.3, PI - 0.3, 6, Color("1f3d22"), 1.6)
+		draw_arc(wing_c + Vector2(-4 + k * 4, -1 + k * 1.5).rotated(wing_rot), 3.5, 0.3, PI - 0.3, 6, col["bars"], 1.6)
 	# большая голова
 	var head := c + Vector2(8 * face, -12) + lunge
 	var tilt := sin(_time * 1.3) * 0.08
-	Art.blob(self, head, 12.5, 12.0, Color("f7dc4f"), 4.0, sd + 4, tilt)
-	for k in 3:
-		var hx := head + Vector2(-face * (5 + k * 2.8), -6 + k * 3)
-		draw_arc(hx, 3.4, PI * 1.05, PI * 1.95, 6, Color("4a3c1c"), 1.5)
+	Art.blob(self, head, 12.5, 12.0, col["head"], 4.0, sd + 4, tilt)
+	if Color(col["stripes"]).a > 0.0 and not col.has("owl"):
+		for k in 3:
+			var hx := head + Vector2(-face * (5 + k * 2.8), -6 + k * 3)
+			draw_arc(hx, 3.4, PI * 1.05, PI * 1.95, 6, col["stripes"], 1.5)
+	if col.has("face"):
+		# жако: светлая маска вокруг глаза
+		Art.fill_blob(self, head + Vector2(5 * face, -1), 6.5, 5.5, col["face"], 3)
+	if col.has("owl"):
+		# какапо: совиный лицевой диск и усики у клюва
+		Art.fill_blob(self, head + Vector2(5 * face, 1), 8.0, 7.5, Color(col["head"]).lightened(0.25), 4)
+		for k in 3:
+			draw_line(head + Vector2(9 * face, 3 + k * 2), head + Vector2(16 * face, 1 + k * 4), Color(col["stripes"], 0.8), 1.0)
 	# хохолок: прижат — спокоен, дыбом — стресс, распушён — жадность
 	var crest_a := -2.4 if face > 0 else -0.74
 	var lift := 1.0 if h.stress > 0.6 or flying else 0.0
 	var greedy := h.greed > 0.65
-	for k in 3:
-		var base: Vector2 = head + Vector2(-face * 3 + k * face * 3, -11)
-		var a := lerpf(crest_a, -PI * 0.5, lift) + (k - 1) * (0.35 if greedy else 0.18)
-		var tip := base + Vector2(cos(a), sin(a)) * (10.0 if greedy else 8.0)
-		draw_line(base, tip, INK, 3.0, true)
-		draw_line(base, tip, Color("f7dc4f"), 1.2, true)
+	if col["crest"] == "small":
+		for k in 3:
+			var base: Vector2 = head + Vector2(-face * 3 + k * face * 3, -11)
+			var a := lerpf(crest_a, -PI * 0.5, lift) + (k - 1) * (0.35 if greedy else 0.18)
+			var tip := base + Vector2(cos(a), sin(a)) * (10.0 if greedy else 8.0)
+			draw_line(base, tip, INK, 3.0, true)
+			draw_line(base, tip, col["head"], 1.2, true)
+	elif col["crest"] == "tall":
+		# какаду: высокий жёлтый хохол, дыбом при стрессе и на низком здоровье
+		var up := 1.0 if h.stress > 0.5 or flying or h.hp_frac() < 0.4 else 0.25
+		for k in 5:
+			var base: Vector2 = head + Vector2(-face * (2 + k * 1.5), -10)
+			var a := lerpf(crest_a - 0.2, -PI * 0.5 - face * 0.25, up) + (k - 2) * 0.13 * face
+			var tip := base + Vector2(cos(a), sin(a)) * (14.0 + 6.0 * up - absf(k - 2) * 1.5)
+			var nrm := (tip - base).normalized().orthogonal() * 2.2
+			var fea := PackedVector2Array([base + nrm, tip, base - nrm])
+			draw_colored_polygon(fea, Color("f2cf3a"))
+			Art.outline(self, fea, INK, 1.6)
 	# глаз: белок, зрачок, блик, моргание раз в несколько секунд
 	var eye := head + Vector2(4 * face, -2)
 	var blink := fmod(_time + float(h.level) * 0.37, 3.3) < 0.12
@@ -731,14 +760,15 @@ func _draw_hero(fr: int) -> void:
 		draw_circle(eye + Vector2(face * 0.8 - 1.0, -1.0), 1.0, Color.WHITE)
 	# восковица, клюв крючком, фиолетовая щёчка и пятнышки на горле
 	var bk := head + Vector2(10 * face, 1)
-	draw_circle(bk + Vector2(-1 * face, -3), 2.6, Color("6d8fd6"))
+	draw_circle(bk + Vector2(-1 * face, -3), 2.6, col["cere"])
 	var open := 3.0 if h.peck_t > 0.0 or h.eat_t > 0.0 else 0.0
 	var beak := PackedVector2Array([bk + Vector2(-1 * face, -1), bk + Vector2(5 * face, 1), bk + Vector2(4 * face, 6 + open), bk + Vector2(-1 * face, 5 + open)])
-	draw_colored_polygon(beak, Color("f0a64a"))
+	draw_colored_polygon(beak, col["beak"])
 	Art.outline(self, beak, INK, 2.0)
-	Art.fill_blob(self, head + Vector2(3 * face, 7), 3.2, 2.4, Color("8a6fd0"))
-	for k in 3:
-		draw_circle(head + Vector2((-1 + k * 3) * face, 12), 1.1, INK)
+	if Color(col["cheek"]).a > 0.0:
+		Art.fill_blob(self, head + Vector2(3 * face, 7), 3.2, 2.4, col["cheek"])
+		for k in 3:
+			draw_circle(head + Vector2((-1 + k * 3) * face, 12), 1.1, INK)
 	if greedy:
 		Art.fill_blob(self, head + Vector2(-2 * face, 5), 3.0, 2.0, Color(1.0, 0.55, 0.6, 0.6))
 	if h.stun > 0.0 or h.held > 0.0 or h.trapped > 0.0:
@@ -750,7 +780,7 @@ func _draw_hero(fr: int) -> void:
 		for k in 3:
 			var a := _time * 4.0 + k * 2.1
 			var fp := c + Vector2(cos(a) * 28.0, -6 + sin(a * 1.3) * 12.0)
-			Art.blob(self, fp, 5.0, 2.0, Color("79c85f"), 1.5, k + fr, a)
+			Art.blob(self, fp, 5.0, 2.0, col["body"], 1.5, k + fr, a)
 	draw_set_transform(Vector2.ZERO)
 	if h.speed_t > 0.0:
 		for k in 3:
@@ -987,6 +1017,66 @@ func _draw_missile(s: Dictionary, fr: int) -> void:
 	Art.blob(self, p, 7.0, 13.0, Color("f5c84c"), 2.5, fr, a, Color("6a4fb3"))
 
 
+## Снаряды попугая: у каждого умения свой силуэт, чтобы было видно, что чем стреляет.
+func _draw_shot(s: Dictionary) -> void:
+	var p: Vector2 = s["pos"]
+	var d: Vector2 = Vector2(s["vel"]).normalized()
+	match String(s.get("kind", "")):
+		"seed":
+			Art.blob(self, p, 3.5, 6.0, Color("3a2e28"), 1.2, 3, d.angle() + PI * 0.5)
+			draw_line(p - d * 3.0, p + d * 3.0, Color("e8dcc0"), 1.2, true)
+		"boomer":
+			var a := _time * 18.0
+			var r: float = s.get("r", 14.0)
+			for k in 2:
+				var dd := Vector2(cos(a + k * PI), sin(a + k * PI))
+				Art.blob(self, p + dd * r * 0.45, r * 0.25, r * 0.6, Color("8fd46a"), 2.0, k, a + k * PI)
+		"crest":
+			Art.blob(self, p, 4.0, 11.0, Color("f7e27a"), 2.0, 5, d.angle() + PI * 0.5)
+		"shard":
+			draw_colored_polygon(PackedVector2Array([p + d * 6.0, p + d.orthogonal() * 3.0, p - d * 4.0, p - d.orthogonal() * 3.0]), Color("fff6e0"))
+		"sock":
+			Art.blob(self, p, 7.0, 10.0, Color("e9e4f0"), 2.0, 7, d.angle())
+		_:
+			draw_line(p - d * 26.0, p - d * 8.0, Color(1, 1, 1, 0.5), 5.0, true)
+			Art.blob(self, p, 5.5, 13.0, Color("bfe3f5") if s["ice"] else Color("8fd46a"), 2.5, int(p.x) % 7, d.angle() + PI * 0.5)
+			draw_line(p - d * 12.0, p + d * 12.0, Color("2f5e33"), 1.5, true)
+
+
+## Лазерная указка: красный луч с точкой на цели.
+func _draw_laser() -> void:
+	var h: Hero = game.hero
+	if h == null or h.laser_pts.is_empty() or not h.skills.has("laser"):
+		return
+	var from := h.pos + Vector2(0, -14)
+	for q in h.laser_pts:
+		var to: Vector2 = q
+		draw_line(from, to, Color(1.0, 0.2, 0.2, 0.35), 6.0, true)
+		draw_line(from, to, Color(1.0, 0.35, 0.3, 0.95), 2.0, true)
+		draw_circle(to, 5.0 + sin(_time * 30.0) * 1.0, Color(1.0, 0.15, 0.1, 0.9))
+		from = to
+
+
+func _draw_mine(m: Dictionary) -> void:
+	var p: Vector2 = m["pos"]
+	var armed: bool = float(m["t"]) >= 0.5
+	Art.blob(self, p, 9.0, 6.5, Color("fff6e0"), 2.0, int(m["id"]), 0.0)
+	draw_polyline(PackedVector2Array([p + Vector2(-8, -1), p + Vector2(-4, -4), p + Vector2(0, 0), p + Vector2(4, -4), p + Vector2(8, -1)]), Art.INK, 1.5)
+	if armed:
+		draw_circle(p + Vector2(0, -8), 2.0, Color(1.0, 0.4, 0.2, 0.6 + 0.4 * sin(_time * 8.0)))
+
+
+func _draw_tornado(t: Dictionary) -> void:
+	var p: Vector2 = t["pos"]
+	var k := clampf(float(t["t"]) / 0.3, 0.0, 1.0) * clampf(float(t["life"]) - float(t["t"]), 0.0, 1.0)
+	Art.fill_blob(self, p + Vector2(0, 8), 26.0, 9.0, Color(0, 0, 0, 0.1 * k))
+	for i in 5:
+		var y := -i * 10.0
+		var w := 10.0 + i * 6.0
+		var a := _time * 14.0 + i
+		draw_arc(p + Vector2(sin(a) * 4.0, y), w, a, a + PI * 1.4, 14, Color(0.6, 0.75, 0.85, 0.75 * k), 3.0, true)
+
+
 ## Пыль замедляет, искры жгут: обе зоны видны сразу, чтобы их было легко обойти.
 func _draw_zone(z: Dictionary, fr: int) -> void:
 	var p: Vector2 = z["pos"]
@@ -1080,6 +1170,36 @@ func _draw_fx(f: Dictionary, fr: int) -> void:
 			Art.blob(self, p, 50, 30, Color(0.86, 0.74, 0.55, 1.0 - k), 3.0, fr, 0.0, Color(INK, 1.0 - k))
 			for i in 4:
 				draw_line(p + Vector2(-40 + i * 26, -22), p + Vector2(-44 + i * 26, 22), Color(0.6, 0.48, 0.32, 1.0 - k), 2.0)
+		"gust":
+			var dir: Vector2 = f["dir"]
+			var half: float = f["half"]
+			var r: float = f["r"]
+			for j in 4:
+				var a := dir.angle() - half + 2.0 * half * (float(j) + 0.5) / 4.0
+				var q := p + Vector2(cos(a), sin(a)) * r * (0.3 + 0.7 * k)
+				draw_arc(q, 10.0, a - 1.2, a + 1.2, 8, Color(0.55, 0.75, 0.85, 0.9 * (1.0 - k)), 2.5, true)
+		"notes":
+			var r: float = f["r"]
+			draw_arc(p, r, 0, TAU, 40, Color(0.55, 0.45, 0.85, 0.25 * (1.0 - k)), 2.0, true)
+			for j in 3:
+				var a := float(j) * 2.1 + float(f["t"]) * 2.0
+				var q := p + Vector2(cos(a), sin(a)) * r * 0.7 + Vector2(0, -20.0 * k)
+				draw_circle(q, 3.5, Color(0.42, 0.31, 0.7, 1.0 - k))
+				draw_line(q + Vector2(3, 0), q + Vector2(3, -10), Color(0.42, 0.31, 0.7, 1.0 - k), 1.5)
+		"lob":
+			var to: Vector2 = f["to"]
+			var q := p.lerp(to, k) - Vector2(0, sin(k * PI) * 90.0)
+			Art.fill_blob(self, to, 18.0 * k, 7.0 * k, Color(0, 0, 0, 0.15))
+			if f["what"] == "book":
+				var pts := Art.rot_rect(q, 30, 22, k * 8.0)
+				draw_colored_polygon(pts, Color("c25b4a"))
+				Art.outline(self, pts, Art.INK, 2.0)
+			else:
+				Art.blob(self, q, 8.0, 7.0, Color("b07a4a"), 2.0, 3, k * 10.0)
+		"starfall":
+			var q := p - Vector2(0, (1.0 - k) * 140.0)
+			Icons._star(self, q, 9.0, Color("ffe36a"), 1.0)
+			Art.fill_blob(self, p, 10.0 * k, 4.0 * k, Color(1.0, 0.9, 0.4, 0.4))
 		"miss":
 			Art.text_c(self, font, p + Vector2(0, -18 - 14.0 * k), "мимо", 14, Color(0.4, 0.4, 0.45, 1.0 - k), Color(1, 1, 1, 0.7 * (1.0 - k)), 4)
 		"stamp":

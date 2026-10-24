@@ -12,7 +12,7 @@ const C_GREEN := Color("7cc46a")
 const C_WING := Color("58a04c")
 const C_YELLOW := Color("f6d84c")
 const C_FOCUS := Color("4f79a8")
-const HERO_SCALE := 1.35
+const HERO_SCALE := 1.6
 const FURN := {
 	"sofa": Color("bfd6b8"), "shelf": Color("d9bf9a"), "table": Color("e6cfa8"), "armchair": Color("d2c4e3"),
 	"plant": Color("e3b89c"), "stool": Color("e8c98f"), "boxes": Color("dcc29b"), "lamp": Color("f3e3b0"),
@@ -57,7 +57,8 @@ func _draw() -> void:
 	for e in game.enemies:
 		if not e.dead:
 			items.append([e.pos.y + e.radius, 1, e])
-	items.append([game.hero.pos.y + game.hero.radius, 2, null])
+	if game.over == "" or game.hero.pos.y > -100.0:
+		items.append([game.hero.pos.y + game.hero.radius + (2000.0 if game.phase != "play" or game.over != "" else 0.0), 2, null])
 	items.sort_custom(func(a, b): return a[0] < b[0])
 	_draw_intent()
 	for it in items:
@@ -92,7 +93,7 @@ func _draw() -> void:
 		game.held_e.tumble = 0.0
 		_draw_enemy(game.held_e, fr)
 	for f in game.fx:
-		if f["kind"] != "burnline":
+		if f["kind"] != "burnline" and f["kind"] != "event_card" and f["kind"] != "reward_fly":
 			_draw_fx(f, fr)
 	for m in game.meteors:
 		_draw_book(m, fr)
@@ -104,7 +105,10 @@ func _draw() -> void:
 		var col: Color = t["color"]
 		col.a = a
 		Art.text_c(self, font, t["pos"], t["text"], int(t["size"]), col, Color(1, 0.98, 0.94, a * 0.9), 5)
+	_draw_event_marks(fr)
+	_draw_outro_items(fr)
 	_draw_menu(fr)
+	_draw_tut(fr)
 	_draw_levelup(fr)
 	if game.debug:
 		_draw_debug()
@@ -571,80 +575,116 @@ func _draw_orbit(fr: int) -> void:
 func _draw_hero(fr: int) -> void:
 	var h: Hero = game.hero
 	var p := h.pos
+	var flying: bool = game.phase == "intro" or game.over != ""
 	var face := 1.0 if h.heading.x >= 0.0 else -1.0
 	if h.peck_t > 0.0:
 		face = 1.0 if h.peck_dir.x >= 0.0 else -1.0
-	var moving := h.vel.length() > 10.0
-	var hop := absf(sin(h.bob)) * 6.0 if moving else 0.0
-	var flap := sin(h.bob * 2.0) * 0.5 if moving and h.speed_t > 0.0 else 0.0
+	var moving := h.vel.length() > 10.0 or flying
+	var hop := absf(sin(h.bob)) * 6.0 if moving and not flying else 0.0
 	var puff := 1.0 + 0.12 * clampf((h.greed - 0.6) / 0.4, 0.0, 1.0)
 	var sd := 991 + fr
-	# клевок: голова выстреливает вперёд к цели
 	var lunge := Vector2.ZERO
 	if h.peck_t > 0.0:
-		var k := sin((1.0 - h.peck_t / 0.18) * PI)
-		lunge = h.peck_dir * 10.0 * k
+		lunge = h.peck_dir * 10.0 * sin((1.0 - h.peck_t / 0.18) * PI)
 	var c := p - Vector2(0, hop)
-	var squash := 1.0 + (0.08 if hop < 1.0 and moving else 0.0)
-	Art.fill_blob(self, p + Vector2(0, 16), 18, 6, Color(0, 0, 0, 0.14))
+	var squash := 1.08 if hop < 1.0 and moving and not flying else 1.0
+	if not flying:
+		Art.fill_blob(self, p + Vector2(0, 18), 19, 6, Color(0, 0, 0, 0.14))
 	if h.trapped > 0.0:
-		_draw_trap(p + Vector2(0, 10), 1.0 - h.trapped)
+		_draw_trap(p + Vector2(0, 12), 1.0 - h.trapped)
 	draw_set_transform(p * (1.0 - HERO_SCALE), 0.0, Vector2(HERO_SCALE, HERO_SCALE))
-	Art.fill_blob(self, c + Vector2(0, -2), 25.0 * puff, 23.0 * puff, Color(1, 0.99, 0.94, 0.9), sd)
-	var green := C_GREEN.lerp(Color.WHITE, 0.5) if h.hurt > 0.0 else C_GREEN
+	Art.fill_blob(self, c + Vector2(2 * face, -6), 28.0 * puff, 27.0 * puff, Color(1, 0.99, 0.94, 0.9), sd)
 	if h.shield_hits > 0:
-		draw_arc(c, 26.0, 0, TAU, 24, Color(0.95, 0.85, 0.2, 0.8), 3.0, true)
-	var tail := PackedVector2Array([c + Vector2(-face * 12, 4), c + Vector2(-face * 30, 14), c + Vector2(-face * 27, 3)])
-	draw_colored_polygon(tail, Color("3f7d5a"))
-	Art.outline(self, tail, INK, 3.0)
-	Art.blob(self, c + Vector2(-2 * face, 3), 16.0 * puff * squash, 13.0 * puff / squash, green, 4.0, sd)
-	var wing_rot := -0.3 * face - flap * face
-	Art.blob(self, c + Vector2(-5 * face, 3), 10.0, 7.0, C_WING, 3.0, sd + 2, wing_rot)
+		draw_arc(c + Vector2(0, -4), 29.0, 0, TAU, 24, Color(0.95, 0.85, 0.2, 0.8), 3.0, true)
+	var hurt := h.hurt > 0.0
+	var green := Color("79c85f").lerp(Color.WHITE, 0.5) if hurt else Color("79c85f")
+	# хвост: два длинных пера
+	var sway := sin(_time * 5.0) * 0.12
 	for k in 2:
-		draw_arc(c + Vector2(-5 * face - 2 + k * 4, 2 + k * 3), 4.0, 0.2, PI - 0.2, 6, Color("2f5e33"), 1.5)
-	var head := c + Vector2(8 * face, -10) + lunge
-	Art.blob(self, head, 10.5, 10.0, C_YELLOW, 4.0, sd + 4)
+		var root := c + Vector2(-face * 10, 8)
+		var dir := Vector2(-face, 0.55 + k * 0.25).normalized().rotated(sway * face)
+		var tip := root + dir * (26.0 - k * 4.0)
+		var nrm := Vector2(-dir.y, dir.x) * 4.0
+		var tail := PackedVector2Array([root + nrm, tip, root - nrm])
+		draw_colored_polygon(tail, Color("2f6e6a") if k == 0 else Color("3f8f7a"))
+		Art.outline(self, tail, INK, 3.0)
+	# лапки
+	if not flying:
+		for k in 2:
+			var fp := c + Vector2(-3 + k * 8, 17)
+			draw_line(fp, fp + Vector2(face * 4, 2), Color("e58a9a"), 3.0)
+			draw_line(fp, fp + Vector2(-face * 2, 3), Color("e58a9a"), 3.0)
+	# тельце-груша и светлое брюшко
+	Art.blob(self, c + Vector2(-2 * face, 5), 16.0 * puff * squash, 14.0 * puff / squash, green, 4.0, sd)
+	Art.fill_blob(self, c + Vector2(3 * face, 9), 8.0 * puff, 7.0 * puff, Color("a8dd8c"), sd + 9)
+	# крыло с волнистыми полосками; в полёте — машет
+	var flap := sin(_time * 22.0) if flying else (sin(h.bob * 2.0) * 0.4 if h.speed_t > 0.0 else 0.0)
+	var wing_c := c + Vector2(-6 * face, 3 - flap * 6.0)
+	var wing_rot := (-0.35 - flap * 0.8) * face
+	Art.blob(self, wing_c, 11.0, 7.5 + absf(flap) * 3.0, Color("4f9a45"), 3.0, sd + 2, wing_rot)
 	for k in 3:
-		var hx := head + Vector2(-face * (3 + k * 2.5), -4 + k * 2)
-		draw_arc(hx, 3.0, PI * 1.1, PI * 1.9, 5, Color("6b5a2a"), 1.3)
+		draw_arc(wing_c + Vector2(-4 + k * 4, -1 + k * 1.5).rotated(wing_rot), 3.5, 0.3, PI - 0.3, 6, Color("1f3d22"), 1.6)
+	# большая голова
+	var head := c + Vector2(8 * face, -12) + lunge
+	var tilt := sin(_time * 1.3) * 0.08
+	Art.blob(self, head, 12.5, 12.0, Color("f7dc4f"), 4.0, sd + 4, tilt)
+	for k in 3:
+		var hx := head + Vector2(-face * (5 + k * 2.8), -6 + k * 3)
+		draw_arc(hx, 3.4, PI * 1.05, PI * 1.95, 6, Color("4a3c1c"), 1.5)
 	# хохолок: прижат — спокоен, дыбом — стресс, распушён — жадность
 	var crest_a := -2.4 if face > 0 else -0.74
-	var lift := 1.0 if h.stress > 0.6 else 0.0
+	var lift := 1.0 if h.stress > 0.6 or flying else 0.0
 	var greedy := h.greed > 0.65
 	for k in 3:
-		var base: Vector2 = head + Vector2(-face * 2 + k * face * 3, -9)
-		var a := lerpf(crest_a, -PI * 0.5, lift) + (k - 1) * (0.35 if greedy else 0.15)
-		var tip := base + Vector2(cos(a), sin(a)) * (9.0 if greedy else 7.0)
-		draw_line(base, tip, INK, 2.5, true)
-	var eye := head + Vector2(3 * face, -2)
-	if h.stun > 0.0 or h.trapped > 0.0:
-		draw_line(eye + Vector2(-2.5, -2.5), eye + Vector2(2.5, 2.5), INK, 2.0)
-		draw_line(eye + Vector2(-2.5, 2.5), eye + Vector2(2.5, -2.5), INK, 2.0)
+		var base: Vector2 = head + Vector2(-face * 3 + k * face * 3, -11)
+		var a := lerpf(crest_a, -PI * 0.5, lift) + (k - 1) * (0.35 if greedy else 0.18)
+		var tip := base + Vector2(cos(a), sin(a)) * (10.0 if greedy else 8.0)
+		draw_line(base, tip, INK, 3.0, true)
+		draw_line(base, tip, Color("f7dc4f"), 1.2, true)
+	# глаз: белок, зрачок, блик, моргание раз в несколько секунд
+	var eye := head + Vector2(4 * face, -2)
+	var blink := fmod(_time + float(h.level) * 0.37, 3.3) < 0.12
+	if h.stun > 0.0 or h.trapped > 0.0 or h.held > 0.0:
+		draw_line(eye + Vector2(-3, -3), eye + Vector2(3, 3), INK, 2.2)
+		draw_line(eye + Vector2(-3, 3), eye + Vector2(3, -3), INK, 2.2)
+	elif blink:
+		draw_line(eye + Vector2(-3.5, 0), eye + Vector2(3.5, 0), INK, 2.2)
 	else:
-		draw_circle(eye, 2.6, INK)
-		draw_circle(eye + Vector2(-0.8, -0.9), 0.8, Color.WHITE)
-	draw_circle(head + Vector2(7 * face, 1), 2.2, Color("6d8fd6"))
+		var wide := 1.25 if game.over == "hero_dead" or h.mode == Hero.Mode.PANIC else 1.0
+		draw_circle(eye, 4.4 * wide, Color.WHITE)
+		draw_arc(eye, 4.4 * wide, 0, TAU, 12, INK, 1.5)
+		draw_circle(eye + Vector2(face * 0.8, 0.3), 2.9, INK)
+		draw_circle(eye + Vector2(face * 0.8 - 1.0, -1.0), 1.0, Color.WHITE)
+	# восковица, клюв крючком, фиолетовая щёчка и пятнышки на горле
+	var bk := head + Vector2(10 * face, 1)
+	draw_circle(bk + Vector2(-1 * face, -3), 2.6, Color("6d8fd6"))
 	var open := 3.0 if h.peck_t > 0.0 or h.eat_t > 0.0 else 0.0
-	var beak := PackedVector2Array([head + Vector2(8 * face, 2), head + Vector2(13 * face, 5 + open * 0.3), head + Vector2(8 * face, 8 + open)])
+	var beak := PackedVector2Array([bk + Vector2(-1 * face, -1), bk + Vector2(5 * face, 1), bk + Vector2(4 * face, 6 + open), bk + Vector2(-1 * face, 5 + open)])
 	draw_colored_polygon(beak, Color("f0a64a"))
 	Art.outline(self, beak, INK, 2.0)
-	draw_circle(head + Vector2(2 * face, 6), 2.2, Color("5f6fcf"))
+	Art.fill_blob(self, head + Vector2(3 * face, 7), 3.2, 2.4, Color("8a6fd0"))
+	for k in 3:
+		draw_circle(head + Vector2((-1 + k * 3) * face, 12), 1.1, INK)
+	if greedy:
+		Art.fill_blob(self, head + Vector2(-2 * face, 5), 3.0, 2.0, Color(1.0, 0.55, 0.6, 0.6))
 	if h.stun > 0.0 or h.held > 0.0 or h.trapped > 0.0:
 		for k in 3:
 			var a := _time * 8.0 + k * TAU / 3.0
-			var sp := head + Vector2(0, -18) + Vector2(cos(a) * 14.0, sin(a) * 5.0)
+			var sp := head + Vector2(0, -20) + Vector2(cos(a) * 14.0, sin(a) * 5.0)
 			Art.blob(self, sp, 3.5, 2.5, Color("f6cd56"), 1.5, k, a)
-	if h.mode == Hero.Mode.PANIC:
-		for k in 2:
-			var a := _time * 4.0 + k * 2.5
-			var fp := c + Vector2(cos(a) * 26.0, -8 + sin(a * 1.3) * 10.0)
-			Art.blob(self, fp, 5.0, 2.0, C_GREEN, 1.5, k + fr, a)
+	if h.mode == Hero.Mode.PANIC or game.over == "hero_dead":
+		for k in 3:
+			var a := _time * 4.0 + k * 2.1
+			var fp := c + Vector2(cos(a) * 28.0, -6 + sin(a * 1.3) * 12.0)
+			Art.blob(self, fp, 5.0, 2.0, Color("79c85f"), 1.5, k + fr, a)
 	draw_set_transform(Vector2.ZERO)
 	if h.speed_t > 0.0:
 		for k in 3:
 			draw_line(p + Vector2(-face * (26 + k * 6), -6 + k * 8), p + Vector2(-face * (40 + k * 6), -6 + k * 8), Color(INK, 0.4), 2.0)
+	if game.over != "" or game.phase == "intro":
+		return
 	var hw := 46.0
-	var hb := Rect2(p + Vector2(-hw * 0.5, -58), Vector2(hw, 6))
+	var hb := Rect2(p + Vector2(-hw * 0.5, -64), Vector2(hw, 6))
 	draw_rect(hb, Color(0, 0, 0, 0.18))
 	draw_rect(Rect2(hb.position, Vector2(hw * h.hp_frac(), 6)), Color("d95c4a") if h.hp_frac() < 0.2 else Color("6fae5c"))
 	draw_rect(hb, INK, false, 1.5)
@@ -702,7 +742,7 @@ func _brackets(p: Vector2, s: float, col: Color) -> void:
 
 func _draw_overhead() -> void:
 	var h: Hero = game.hero
-	if not game.levelup.is_empty():
+	if not game.levelup.is_empty() or game.over != "" or game.phase == "intro":
 		return
 	var label: String = Hero.MODE_NAMES[h.mode]
 	if h.dodging:
@@ -719,7 +759,7 @@ func _draw_overhead() -> void:
 		label = "ням!"
 	var size := 15
 	var w := Art.text_w(font, label, size) + 16.0
-	var c := h.pos + Vector2(0, -80)
+	var c := h.pos + Vector2(0, -86)
 	var r := Rect2(c - Vector2(w * 0.5, 13), Vector2(w, 22))
 	var fill := Color("fff8ea")
 	if h.mode == Hero.Mode.PANIC or h.dodging:
@@ -773,21 +813,34 @@ func _draw_levelup(fr: int) -> void:
 	var cards: Array = lu["cards"]
 	var scores: Array = lu["scores"]
 	var chosen: int = lu["chosen"]
+	var blocked: int = lu["blocked"]
 	var picked: bool = t >= game.LU_PICK
+	var can_block: bool = game.levelup_block_open()
+	var tut: bool = lu["tut"]
 	var n := cards.size()
-	var hover := chosen
-	if not picked:
+	var hover := -1
+	if not picked and t > game.LU_BLOCK:
 		var seq := [0, 1, 2, 1, 0, 2, 1, 2, 0]
-		hover = seq[int(t * 5.0) % seq.size()] % n
+		hover = seq[int(t * 6.0) % seq.size()] % n
+		if hover == blocked:
+			hover = (hover + 1) % n
+	elif picked:
+		hover = chosen
 	var center := h.pos
-	var ring := 130.0 * (0.6 + 0.4 * appear)
-	var start := -PI * 0.5
-	# кольцо выбора: это решает герой, а не игрок
+	var ring := center.distance_to(game.levelup_card_pos(0))
 	draw_arc(center, ring, 0, TAU, 64, Color(0.95, 0.75, 0.25, 0.5 * fade), 4.0, true)
-	Art.text_c(self, font, center + Vector2(0, -ring - 76), "Кеша выбирает · ур. %d" % int(lu["level"]), 20, Color(INK, fade), Color(1, 0.98, 0.93, 0.95 * fade), 6)
+	if can_block:
+		# окно игрока: ткнуть в карту и запретить её
+		var left := 1.0 - clampf(t / game.LU_BLOCK, 0.0, 1.0) if not tut else 1.0
+		draw_arc(center, ring + 56.0, -PI * 0.5, -PI * 0.5 + TAU * left, 64, Color(0.8, 0.2, 0.15, 0.85), 6.0, true)
+		var cap := "Ткните в умение, чтобы попугай не смог его взять!" if tut else "Можно запретить одно умение!"
+		var sz := 26 if tut else 20
+		var pulse := 0.6 + 0.4 * sin(_time * 10.0)
+		Art.text_c(self, font, center + Vector2(0, -ring - 96), cap, sz, Color(0.75, 0.15, 0.1, fade), Color(1, 0.98, 0.9, pulse), 8)
+	else:
+		Art.text_c(self, font, center + Vector2(0, -ring - 76), "Кеша выбирает · ур. %d" % int(lu["level"]), 20, Color(INK, fade), Color(1, 0.98, 0.93, 0.95 * fade), 6)
 	for i in n:
-		var a := start + TAU * float(i) / float(n)
-		var cp := center + Vector2(cos(a), sin(a)) * ring
+		var cp: Vector2 = game.levelup_card_pos(i)
 		var c: Dictionary = cards[i]
 		var k: String = c["key"]
 		var is_h := i == hover
@@ -797,10 +850,17 @@ func _draw_levelup(fr: int) -> void:
 		var size := 64.0
 		if is_h:
 			size = 76.0 + (6.0 * sin(t * 18.0) if not picked else 10.0)
-		if is_h:
+		if can_block:
+			size = 70.0 + 6.0 * sin(_time * 12.0 + i)
+			Art.fill_blob(self, cp, size * 0.85, size * 0.85, Color(1.0, 0.35, 0.25, 0.25 + 0.15 * sin(_time * 12.0)))
+		if is_h and i != blocked:
 			draw_line(center, cp, Color(0.95, 0.7, 0.2, 0.7 * al), 3.0, true)
 			Art.fill_blob(self, cp, size * 0.8, size * 0.8, Color(1.0, 0.85, 0.3, 0.35 * al))
 		Icons.draw(self, k, cp, size, al)
+		if i == blocked:
+			draw_line(cp + Vector2(-30, -30), cp + Vector2(30, 30), Color(0.8, 0.15, 0.1, al), 7.0, true)
+			draw_line(cp + Vector2(-30, 30), cp + Vector2(30, -30), Color(0.8, 0.15, 0.1, al), 7.0, true)
+			Art.text_c(self, font, cp + Vector2(0, -size * 0.5 - 12), "ЗАПРЕЩЕНО", 17, Color(0.75, 0.15, 0.1, al), Color(1, 0.98, 0.9, al), 6)
 		var title: String = Skills.NAMES[k]
 		var tag := ""
 		match c["kind"]:
@@ -818,8 +878,6 @@ func _draw_levelup(fr: int) -> void:
 		if picked and i == chosen:
 			Art.text_c(self, font, cp + Vector2(0, -size * 0.5 - 12), "ВЫБРАЛ", 18, Color(0.75, 0.45, 0.05, al), Color(1, 0.98, 0.9, al), 6)
 
-
-# ---------- книги и эффекты ----------
 
 func _draw_shadow(m: Dictionary) -> void:
 	var p: Vector2 = m["pos"]
@@ -933,6 +991,13 @@ func _draw_fx(f: Dictionary, fr: int) -> void:
 			draw_polyline(PackedVector2Array([p + Vector2(-9, 0), p + Vector2(-4, -4), p + Vector2(0, 1), p + Vector2(5, -4), p + Vector2(9, 0)]), Color(INK, 1.0 - k), 2.0)
 		"eat":
 			Icons.draw(self, f["fruit"], p + Vector2(0, -60 - 20 * k), 34.0, 1.0 - k, false)
+		"confetti":
+			var cols := [Color("f2c14e"), Color("e98a7a"), Color("8fb6e8"), Color("9fcf8c"), Color("cdb3dc")]
+			for i in 24:
+				var a := TAU * i / 24.0 + float(i) * 0.37
+				var sp := 120.0 + float(i % 5) * 40.0
+				var q := p + Vector2(cos(a), sin(a)) * sp * k + Vector2(0, 160.0 * k * k)
+				draw_rect(Rect2(q - Vector2(4, 2), Vector2(8, 4)), Color(cols[i % 5], 1.0 - k))
 
 
 func _draw_debug() -> void:
@@ -947,3 +1012,85 @@ func _draw_debug() -> void:
 	if h.horde_count > 0:
 		draw_circle(h.horde_center, 6.0, Color(0.6, 0.1, 0.6, 0.7))
 	draw_arc(h.pos, h.view_radius(), 0, TAU, 64, Color(0.3, 0.3, 0.8, 0.25), 1.0)
+
+
+
+# ---------- обучение игрока ----------
+
+func _draw_tut(fr: int) -> void:
+	var tu: Dictionary = game.tut
+	if tu.is_empty() or tu["kind"] != "millet":
+		return
+	var g: Dictionary = tu["gem"]
+	var p: Vector2 = g["pos"]
+	var pulse := 0.5 + 0.5 * sin(_time * 8.0)
+	draw_arc(p, 30.0 + 8.0 * pulse, 0, TAU, 32, Color(0.42, 0.31, 0.7, 0.9), 4.0, true)
+	draw_arc(p, 48.0 + 8.0 * pulse, 0, TAU, 32, Color(0.42, 0.31, 0.7, 0.4), 3.0, true)
+	var a := p + Vector2(0, -90 - 10 * pulse)
+	draw_line(a, p + Vector2(0, -40), Color(0.42, 0.31, 0.7, 1.0), 5.0, true)
+	draw_polyline(PackedVector2Array([p + Vector2(-12, -54), p + Vector2(0, -40), p + Vector2(12, -54)]), Color(0.42, 0.31, 0.7, 1.0), 5.0)
+	var cap := "Выберите подмену: попугай её не увидит" if not game.menu.is_empty() else "Кликните по колоску проса!"
+	Art.text_c(self, font, p + Vector2(0, -110), cap, 24, Color(0.42, 0.31, 0.7), Color(1, 0.98, 0.93, 0.95), 8)
+
+
+# ---------- ивенты: маяк и награда видны издалека ----------
+
+func _draw_event_marks(fr: int) -> void:
+	var ev: Dictionary = game.event
+	if ev.is_empty():
+		return
+	var p := Vector2.ZERO
+	if ev.has("pos"):
+		p = ev["pos"]
+	else:
+		for e in game.enemies:
+			if e.type == Enemy.T.BOX and not e.dead:
+				p = e.pos
+	if p == Vector2.ZERO:
+		return
+	var bob := sin(_time * 3.0) * 6.0
+	# столб света
+	var top := p + Vector2(0, -150)
+	draw_colored_polygon(PackedVector2Array([p + Vector2(-26, 0), top + Vector2(-10, 0), top + Vector2(10, 0), p + Vector2(26, 0)]), Color(1.0, 0.88, 0.4, 0.18 + 0.06 * sin(_time * 4.0)))
+	var ip := p + Vector2(0, -78 + bob)
+	Art.fill_blob(self, ip, 30, 30, Color(1.0, 0.92, 0.55, 0.55))
+	Icons.draw(self, ev["fruit"], ip, 42.0, 1.0)
+	for k in 4:
+		var a := _time * 2.0 + k * TAU / 4.0
+		Icons._star(self, ip + Vector2(cos(a), sin(a)) * 30.0, 5.0, Color("f6d84c"), 0.9)
+	Art.text_c(self, font, ip + Vector2(0, -32), "награда", 14, Color("8a5a1e"), Color(1, 0.98, 0.9, 0.9), 5)
+	if ev["type"] == "glow":
+		Art.text_c(self, font, game.hero.pos + Vector2(0, -110), "светящиеся зёрна: %d/%d · %d с" % [int(ev["got"]), game.GLOW_NEED, int(ceil(float(ev["left"])))], 18, Color("2f8fa8"), Color(1, 0.98, 0.93, 0.9), 5)
+	elif ev["type"] == "box":
+		Art.text_c(self, font, p + Vector2(0, 40), "%d с" % int(ceil(float(ev["left"]))), 18, Color("8a5a1e"), Color(1, 0.98, 0.93, 0.9), 5)
+
+
+# ---------- финал: яйцо и перья ----------
+
+func _draw_outro_items(fr: int) -> void:
+	var o: Dictionary = game.outro
+	if o.is_empty():
+		return
+	for it in o["items"]:
+		if it["got"]:
+			continue
+		var p: Vector2 = it["pos"]
+		var pulse := 0.5 + 0.5 * sin(_time * 6.0)
+		if it["landed"]:
+			Art.fill_blob(self, p, 40 + 8 * pulse, 40 + 8 * pulse, Color(1.0, 0.9, 0.45, 0.35))
+			for k in 6:
+				var a := _time * 1.5 + k * TAU / 6.0
+				Icons._star(self, p + Vector2(cos(a), sin(a)) * (46.0 + 4.0 * pulse), 5.0, Color("f6d84c"), 0.9)
+		if it["kind"] == "egg":
+			Art.fill_blob(self, p + Vector2(4, 24), 20, 6, Color(0, 0, 0, 0.15))
+			Art.blob(self, p, 18.0, 23.0, Color("fff7e6"), 3.5, fr)
+			for k in 4:
+				draw_circle(p + Vector2(-8 + (k % 2) * 12, -10 + k * 6), 2.5, Color("c9b38a"))
+			if it["landed"]:
+				Art.text_c(self, font, p + Vector2(0, -44), "Кликните по яйцу!", 22, Color("8a5a1e"), Color(1, 0.98, 0.9, 0.95), 7)
+		else:
+			var rot := sin(float(it["sway"])) * 0.6
+			Art.blob(self, p, 6.0, 18.0, Color("79c85f"), 2.5, fr, rot)
+			draw_line(p + Vector2(0, 18).rotated(rot), p + Vector2(0, -16).rotated(rot), Color("2f5e33"), 2.0)
+			if it["landed"]:
+				Art.text_c(self, font, p + Vector2(0, -34), "перо!", 18, Color("4f8f3a"), Color(1, 0.98, 0.9, 0.95), 6)

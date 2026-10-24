@@ -90,6 +90,11 @@ var horde_count := 0
 var horde_obj := {"id": -1, "pos": Vector2.ZERO, "born": -10.0}
 var chests_opened := 0
 var events_done := 0
+# память между забегами
+var learned_taken := {}
+var learned_dealt := {}
+var learned_runs := 0
+var memory_notes: Array[String] = []
 var bob := 0.0
 var dirs: Array[Vector2] = []
 var dbg_D := PackedFloat32Array()
@@ -105,6 +110,49 @@ func _init(g) -> void:
 	dbg_I.resize(NDIR)
 	horde_obj["id"] = g.new_id()
 	hp = max_hp()
+
+
+# ---------- память между забегами ----------
+
+const SRC_TEXT := {
+	"throw": "брошенные носки", "meteor": "книги с полки", "paw": "лапка", "sock": "носки", "yarn": "клубки",
+	"slipper": "тапки", "sprayer": "пульверизаторы", "hand": "Рука", "boss": "пылесос", "super": "суперноски",
+	"trap": "капканы в просе", "rotten": "тухлое просо", "missile": "просо-снаряды", "dust": "пылевые зайчики",
+}
+
+
+## Попугай учится из забега в забег: на что смотреть внимательнее и какие умения ему лучше заходят.
+func learn(mem: Dictionary) -> void:
+	learned_runs = int(mem.get("runs", 0))
+	learned_taken = mem.get("taken", {})
+	learned_dealt = mem.get("dealt", {})
+	memory_notes.clear()
+	if learned_runs <= 0:
+		return
+	var trick := float(learned_taken.get("rotten", 0.0)) + float(learned_taken.get("trap", 0.0)) + float(learned_taken.get("missile", 0.0))
+	wariness["millet"] = minf(0.4, trick * 1.5)
+	var top := _top_keys(learned_taken, 2)
+	if top.size() > 0:
+		var parts: Array[String] = []
+		for k in top:
+			parts.append("%s (%d%%)" % [SRC_TEXT.get(k, k), int(round(float(learned_taken[k]) * 100.0))])
+		memory_notes.append("Помню: больше всего меня били %s. Буду следить." % ", ".join(parts))
+	var best := _top_keys(learned_dealt, 1)
+	if best.size() > 0 and best[0] != "peck":
+		memory_notes.append("Лучше всего у меня шли %s. Возьму снова, если выпадет." % String(Skills.NAMES.get(best[0], best[0])))
+	if trick > 0.08:
+		memory_notes.append("Крупному просу больше не доверяю.")
+
+
+static func _top_keys(d: Dictionary, n: int) -> Array:
+	var keys := d.keys()
+	keys.sort_custom(func(a, b): return float(d[a]) > float(d[b]))
+	return keys.slice(0, n)
+
+
+## Насколько попугай насторожен к источнику по опыту прошлых забегов (0..~1).
+func learned_alert(src: String) -> float:
+	return clampf(float(learned_taken.get(src, 0.0)) * 2.5, 0.0, 1.2)
 
 
 # ---------- характеристики ----------
@@ -280,9 +328,9 @@ func _attention() -> void:
 	var cands: Array = []
 	for m in game.meteors:
 		if not m["landed"]:
-			_cand(cands, m, 0.2, view, t)
+			_cand(cands, m, 0.2 + learned_alert("meteor"), view, t)
 	if game.paw_seen():
-		_cand(cands, game.paw, 2.0 + 2.0 * float(wariness["paw"]), view, t)
+		_cand(cands, game.paw, 2.0 + 2.0 * float(wariness["paw"]) + learned_alert("paw"), view, t)
 	for e in near:
 		match e.type:
 			Enemy.T.HAND:
@@ -301,7 +349,7 @@ func _attention() -> void:
 	for s in game.enemy_shots:
 		_cand(cands, s, 0.9, view, t)
 	for s in game.thrown:
-		_cand(cands, s, 1.0 + 2.0 * float(wariness["throw"]), view, t)
+		_cand(cands, s, 1.0 + 2.0 * float(wariness["throw"]) + learned_alert("throw"), view, t)
 	for s in game.missiles:
 		_cand(cands, s, 1.1, view, t)
 	var ev: Dictionary = game.event
@@ -973,7 +1021,7 @@ func _weapons(delta: float) -> void:
 			var e: Enemy = ts[0]
 			peck_dir = (e.pos - pos).normalized()
 			peck_t = 0.18
-			game.damage_enemy(e, 11.0 * dmg_mult(), peck_dir * 140.0)
+			game.damage_enemy(e, 11.0 * dmg_mult(), peck_dir * 140.0, true, "peck")
 			game.add_fx({"kind": "peck", "pos": pos, "to": e.pos, "dur": 0.2})
 			game.sfx("peck", -6.0, randf_range(0.9, 1.15))
 			cds["peck"] = 0.42
@@ -1011,7 +1059,7 @@ func _weapons(delta: float) -> void:
 						kb = (e.pos - pos).normalized() * 240.0
 					elif has_mod("bell_pull"):
 						kb = (pos - e.pos).normalized() * 60.0
-					game.damage_enemy(e, (2.0 + 1.5 * lvl) * dmg_mult(), kb)
+					game.damage_enemy(e, (2.0 + 1.5 * lvl) * dmg_mult(), kb, true, "bell")
 					if has_mod("bell_stun") and tick % 6 == 0:
 						e.stun = maxf(e.stun, 0.4)
 				if has_mod("bell_pull"):
@@ -1053,7 +1101,7 @@ func _beam(from: Vector2, dir: Vector2, dmg: float) -> void:
 	var hit: Array = []
 	for e in game.enemies_near(from.lerp(b, 0.5), length * 0.5 + 20.0, 999):
 		if Geometry2D.get_closest_point_to_segment(e.pos, from, b).distance_to(e.pos) < e.radius + width:
-			game.damage_enemy(e, dmg, dir * 60.0)
+			game.damage_enemy(e, dmg, dir * 60.0, true, "mirror")
 			hit.append(e)
 			if has_mod("mirror_blind"):
 				e.stun = maxf(e.stun, 0.6)
@@ -1071,7 +1119,7 @@ func _beam(from: Vector2, dir: Vector2, dmg: float) -> void:
 					break
 			if picked == null:
 				break
-			game.damage_enemy(picked, dmg * 0.7, Vector2.ZERO)
+			game.damage_enemy(picked, dmg * 0.7, Vector2.ZERO, true, "mirror")
 			game.add_fx({"kind": "beam", "pos": cur.pos, "to": picked.pos, "dur": 0.25})
 			hit.append(picked)
 			cur = picked
@@ -1084,7 +1132,7 @@ func scream_at(rr: float, dmg: float) -> void:
 
 func _scream(rr: float, dmg: float) -> void:
 	for e in game.enemies_near(pos, rr, 999):
-		game.damage_enemy(e, dmg, (e.pos - pos).normalized() * 260.0)
+		game.damage_enemy(e, dmg, (e.pos - pos).normalized() * 260.0, true, "scream")
 		if has_mod("scream_stun"):
 			e.stun = maxf(e.stun, 0.5)
 		if has_mod("scream_fear"):
@@ -1112,7 +1160,7 @@ func _orbit(delta: float, lvl: int) -> void:
 				continue
 			e.orbit_cd = 0.5
 			var kb: Vector2 = (e.pos - pos).normalized() * (320.0 if has_mod("orbit_knock") else 90.0)
-			game.damage_enemy(e, (6.0 + 3.0 * lvl) * dmg_mult(), kb)
+			game.damage_enemy(e, (6.0 + 3.0 * lvl) * dmg_mult(), kb, true, "orbit")
 			if has_mod("orbit_fire"):
 				e.burn = 2.0
 				e.burn_dps = 3.0 + lvl
@@ -1194,7 +1242,9 @@ func dodge_paw(dir: Vector2) -> void:
 func try_dodge_throw(id: int, v: Vector2) -> bool:
 	if not focus_ids.has(id) or stun > 0.0 or held > 0.0 or trapped > 0.0:
 		return false
-	if randf() > 0.45 + float(wariness["throw"]):
+	# в панике летящий носок легко прозевать
+	var chance := clampf(0.75 - 0.9 * stress + float(wariness["throw"]) + 0.2 * learned_alert("throw"), 0.05, 0.85)
+	if randf() > chance:
 		return false
 	var dir := v.normalized()
 	var side := Vector2(-dir.y, dir.x)
@@ -1251,6 +1301,13 @@ func score_card(card: Dictionary) -> Dictionary:
 		if reason == "сильная карта":
 			reason = "усилю %s" % Skills.NAMES[Skills.mod_parent(k)]
 	var shares := _damage_shares()
+	if learned_runs > 0:
+		var hist := {}
+		for src in learned_taken:
+			var cat := Skills.category(src)
+			hist[cat] = float(hist.get(cat, 0.0)) + float(learned_taken[src])
+		for cat in hist:
+			shares[cat] = float(shares.get(cat, 0.0)) * 0.6 + float(hist[cat]) * 0.4
 	var best_r := 0.0
 	var best_txt := ""
 	for cat in shares:
@@ -1263,6 +1320,11 @@ func score_card(card: Dictionary) -> Dictionary:
 	s += best_r
 	if best_r > 1.5:
 		reason = best_txt
+	if card["kind"] == "skill" and learned_dealt.has(k):
+		# умение хорошо заходило в прошлых забегах
+		s += 3.0 * float(learned_dealt[k])
+		if float(learned_dealt[k]) > 0.25 and reason == "сильная карта":
+			reason = "оно у меня хорошо работает"
 	if card["kind"] == "skill":
 		# урон решает выживание: умения ценятся выше пассивок, особенно пока их мало
 		if card["new"]:

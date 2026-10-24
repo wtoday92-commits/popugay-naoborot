@@ -1,8 +1,8 @@
 class_name Hud
 extends Node2D
-## Боковые полосы с информацией (поле посередине не перекрывается):
-## слева — герой, его умения и пассивки, фрукты, цели и очередь ивентов (её можно перетаскивать);
-## справа — время и орда, лента мыслей, кнопки игрока. Поверх всего — кошачья лапка.
+## Боковые полосы с информацией (поле посередине не перекрывается). На старте они пустые:
+## блоки выезжают с анимацией, когда появляется то, что в них показывать.
+## Слева — герой, умения, фрукты, цели, очередь ивентов (перетаскивается); справа — время, мысли, кнопки игрока.
 
 const INK := Art.INK
 const PANEL := Color(1.0, 0.98, 0.93, 1.0)
@@ -10,18 +10,41 @@ const STRIP := Color("efe4d2")
 const C_HP := Color("74b562")
 const C_STRESS := Color("e07a6a")
 const C_GREED := Color("e8b84a")
-const C_PLAYER := Color("6a4fb3")
 const LEFT := Rect2(0, 0, 340, 1080)
 const RIGHT := Rect2(1580, 0, 340, 1080)
 const QUEUE_Y := 676.0
 const QUEUE_ROW := 74.0
+const APPEAR := 0.45
 
 var game
 var font: Font
+var _shown := {}
 
 
 func _ready() -> void:
 	font = ThemeDB.fallback_font
+
+
+func _now() -> float:
+	return Time.get_ticks_msec() / 1000.0
+
+
+## Блок появляется один раз и выезжает с «пружинкой»; возвращает сдвиг по x (0 — на месте) или NAN, если блока нет.
+func _slide(name: String, visible: bool, from_left: bool) -> float:
+	if not visible and not _shown.has(name):
+		return NAN
+	if not _shown.has(name):
+		_shown[name] = _now()
+		if game.time > 0.5:
+			game.sfx("tick", -10.0, 0.9)
+	var k := clampf((_now() - float(_shown[name])) / APPEAR, 0.0, 1.0)
+	var c1 := 1.70158
+	var e := 1.0 + (c1 + 1.0) * pow(k - 1.0, 3.0) + c1 * pow(k - 1.0, 2.0)
+	return (1.0 - e) * (-360.0 if from_left else 360.0)
+
+
+func reset() -> void:
+	_shown.clear()
 
 
 func _t(p: Vector2, s: String, size: int, col: Color = INK) -> void:
@@ -50,13 +73,23 @@ func _draw() -> void:
 	draw_rect(RIGHT, STRIP)
 	draw_line(Vector2(LEFT.end.x, 0), Vector2(LEFT.end.x, 1080), INK, 3.0)
 	draw_line(Vector2(RIGHT.position.x, 0), Vector2(RIGHT.position.x, 1080), INK, 3.0)
-	_draw_hero_card(h, fr)
-	_draw_queue(fr)
-	_draw_top(h, fr)
-	_draw_thoughts(fr)
-	_draw_buttons(h, fr)
+	var playing: bool = game.phase == "play"
+	_panel("hero", playing, true, func(): _draw_hero_card(h, fr))
+	_panel("skills", h.skills.size() + h.general.size() > 0, true, func(): _draw_skills(h, fr))
+	_panel("fruits", h.fruits.size() > 0 or h.shield_hits > 0, true, func(): _draw_fruits(h, fr))
+	_panel("goals", playing and game.time > 3.0, true, func(): _draw_goals(h, fr))
+	var q_vis: bool = playing and (not game.first_run or game.time >= game.EVENT_SLOTS[0] - 25.0)
+	_panel("queue", q_vis, true, func(): _draw_queue(fr))
+	_panel("timer", playing, false, func(): _draw_top(h, fr))
+	_panel("thoughts", game.thoughts.size() > 1 and game.time > 1.0, false, func(): _draw_thoughts(fr))
+	_panel("hands", playing, false, func(): _draw_buttons(h, fr))
 	_draw_banners()
 	_draw_vignettes(h)
+	for f in game.fx:
+		if f["kind"] == "event_card":
+			_draw_event_card(f)
+		elif f["kind"] == "reward_fly":
+			_draw_reward_fly(f)
 	if game.hint_t > 0.0 and game.over == "":
 		var a := clampf(game.hint_t, 0.0, 1.0)
 		var w := minf(Art.text_w(font, game.hint, 18) + 30.0, 1200.0)
@@ -68,6 +101,15 @@ func _draw() -> void:
 	if game.over != "":
 		_draw_end()
 	_draw_paw(fr)
+
+
+func _panel(name: String, visible: bool, from_left: bool, fn: Callable) -> void:
+	var dx := _slide(name, visible, from_left)
+	if is_nan(dx):
+		return
+	draw_set_transform(Vector2(dx, 0))
+	fn.call()
+	draw_set_transform(Vector2.ZERO)
 
 
 # ---------- левая полоса ----------
@@ -85,9 +127,11 @@ func _draw_hero_card(h: Hero, fr: int) -> void:
 		_t(Vector2(244, 132), "рискует", 12, Color("9a6a10"))
 	_t(Vector2(24, 160), "Режим: " + String(Hero.MODE_NAMES[h.mode]), 16)
 	_t(Vector2(24, 184), "Смотрит на %d из 3" % h.focus.size() + (" · слоты заморожены" if h.choosing else ""), 13, Color("4f79a8"))
-	_t(Vector2(24, 208), "План: Колокольчик + Пух", 13, Color(INK, 0.6))
+	var mem := "Забегов в памяти: %d" % h.learned_runs if h.learned_runs > 0 else "Первый забег: память пуста"
+	_t(Vector2(24, 208), mem, 13, Color(INK, 0.6))
 
-	# умения (до 3) с особой пассивкой и общие пассивки (до 3)
+
+func _draw_skills(h: Hero, fr: int) -> void:
 	Art.card(self, Rect2(10, 236, 320, 206), PANEL, fr + 1)
 	_t(Vector2(24, 260), "Умения", 16)
 	_t(Vector2(174, 260), "Пассивки", 16)
@@ -116,7 +160,8 @@ func _draw_hero_card(h: Hero, fr: int) -> void:
 	if hover != "":
 		_t(Vector2(24, 434), "%s: %s" % [Skills.NAMES[hover], Skills.DESC[hover]], 13, Color(INK, 0.8))
 
-	# фрукты
+
+func _draw_fruits(h: Hero, fr: int) -> void:
 	Art.card(self, Rect2(10, 450, 320, 84), PANEL, fr + 2)
 	_t(Vector2(24, 474), "Фрукты (ест сам)", 16)
 	for i in 3:
@@ -130,7 +175,8 @@ func _draw_hero_card(h: Hero, fr: int) -> void:
 	if h.shield_hits > 0:
 		_t(Vector2(206, 516), "щит: %d" % h.shield_hits, 12, Color("9a8a10"))
 
-	# цели
+
+func _draw_goals(h: Hero, fr: int) -> void:
 	Art.card(self, Rect2(10, 542, 320, 114), PANEL, fr + 3)
 	_t(Vector2(24, 566), "Цели героя", 16)
 	var dead: bool = game.over == "hero_dead"
@@ -188,6 +234,8 @@ func queue_row_rect(i: int) -> Rect2:
 
 
 func queue_press(p: Vector2) -> Dictionary:
+	if not _shown.has("queue"):
+		return {}
 	for i in game.queue.size():
 		if queue_row_rect(i).has_point(p):
 			if game.queue_locked(i):
@@ -211,14 +259,11 @@ func _draw_queue(fr: int) -> void:
 	Art.card(self, box, PANEL, fr + 4)
 	_t(Vector2(24, QUEUE_Y + 24), "Ивенты (перетащите)", 16)
 	var dragging: Dictionary = game.drag
-	var cur: int = game.next_queue_index()
-	if cur < 0 or not game.event.is_empty():
-		cur = _active_row()
+	var cur := _active_row()
 	for i in game.queue.size():
 		if not dragging.is_empty() and int(dragging["from"]) == i:
 			continue
 		_queue_row(i, queue_row_rect(i), fr, i == cur)
-	# босс — всегда последний и не двигается
 	var br := Rect2(18, QUEUE_Y + 34 + game.queue.size() * QUEUE_ROW, 304, QUEUE_ROW - 8)
 	Art.card(self, br, Color("e8e2dc"), fr + 9, INK, 2.0)
 	Icons.draw(self, "boss", br.position + Vector2(32, br.size.y * 0.5), 44.0)
@@ -232,28 +277,25 @@ func _draw_queue(fr: int) -> void:
 
 
 func _active_row() -> int:
-	var last := -1
-	for i in game.queue.size():
-		if game.queue[i].has("done"):
-			last = i
-	return last
+	if game.event.is_empty():
+		return -1
+	return int(game.event.get("qi", -1))
 
 
-func _queue_row(i: int, r: Rect2, fr: int, current: bool, lifted: bool = false) -> void:
+func _queue_row(i: int, r: Rect2, fr: int, active: bool, lifted: bool = false) -> void:
 	var q: Dictionary = game.queue[i]
 	var type: String = q["type"]
 	var locked: bool = game.queue_locked(i)
 	var done: bool = q.has("done")
-	var active: bool = current and done and not game.event.is_empty()
 	var fill := Color(1, 0.96, 0.86) if not locked else Color("ece6dc")
 	if active:
 		fill = Color("ffe9b0")
 	if lifted:
 		fill = Color(1, 0.93, 0.7)
 		draw_rect(Rect2(r.position + Vector2(6, 6), r.size), Color(0, 0, 0, 0.15))
-	Art.card(self, r, fill, fr + i, INK, 3.0 if lifted else 2.0)
+	Art.card(self, r, fill, fr + i, INK, 3.0 if lifted or active else 2.0)
 	var a := 0.45 if done and not active else 1.0
-	Icons.draw(self, type, r.position + Vector2(32, r.size.y * 0.5), 44.0, a)
+	Icons.draw(self, type, r.position + Vector2(32, r.size.y * 0.5), 44.0 + (4.0 * sin(Time.get_ticks_msec() * 0.008) if active else 0.0), a)
 	_t(r.position + Vector2(62, 26), Skills.EVENT_NAMES[type], 16, Color(INK, a))
 	var at: float = q["at"]
 	var sub := "в %s" % mmss(at)
@@ -318,29 +360,68 @@ func _draw_thoughts(fr: int) -> void:
 		i += 1
 
 
+const BTN := {
+	"throw": ["grab", "Бросок носка", "ЛКМ/ПКМ", "зажать, потянуть, отпустить"],
+	"ram": ["ram", "Таран лапкой", "мышь", "резкий взмах в попугая"],
+	"millet": ["millet", "Подмена проса", "ЛКМ", "клик по колоску"],
+	"book": ["book", "Книга с полки", "Q", "тень 1,2 с, −15% здоровья"],
+	"basket": ["basket", "Корзина белья", "W", "носки и тапки у стены"],
+}
+
+
 func _draw_buttons(h: Hero, fr: int) -> void:
 	var x := RIGHT.position.x
 	var edge: bool = h.hp_frac() < 0.2 and game.over == ""
-	Art.card(self, Rect2(x + 10, 536, 320, 418), PANEL, fr + 7)
+	var vis: Array = []
+	for k in game.ABILITY_ORDER:
+		if game.ability_visible(k):
+			vis.append(k)
+	var height := 50.0 + vis.size() * 74.0
+	Art.card(self, Rect2(x + 10, 536, 320, height), PANEL, fr + 7)
 	_t(Vector2(x + 24, 560), "Ваши руки", 16)
 	var y := 572.0
-	_button(Vector2(x + 20, y), "book", "Книга с полки", "Q", "тень 1,2 с, −15% здоровья", game.meteor_cd, game.METEOR_CD, true, edge)
-	var wave_ok: bool = game.time >= game.WAVE_UNLOCK
-	_button(Vector2(x + 20, y + 74), "basket", "Корзина белья", "W", "носки и тапки у стены" if wave_ok else "откроется в 1:30", game.wave_cd, game.WAVE_CD, wave_ok, edge)
-	_button(Vector2(x + 20, y + 148), "grab", "Бросок носка", "ЛКМ/ПКМ", "зажать на носке, метнуть", game.throw_cd, game.THROW_CD, true, false)
-	_button(Vector2(x + 20, y + 222), "millet", "Подмена проса", "ЛКМ", "клик по колоску", game.millet_cd, game.MILLET_CD, true, edge)
-	var st := "резкий взмах в попугая"
-	var cd := 0.0
-	var ram_ok: bool = game.time >= game.RAM_UNLOCK
-	if game.paw_bruise > 0.0:
-		st = "лапка ушиблена"
-		cd = game.paw_bruise
-	elif not ram_ok:
-		st = "откроется в 0:20"
-	_button(Vector2(x + 20, y + 296), "ram", "Таран лапкой", "мышь", st, cd, game.PAW_BRUISE, ram_ok, edge)
+	for k in vis:
+		var dx := _slide("btn_" + k, true, false)
+		draw_set_transform(Vector2(dx, 0))
+		_ability(k, Vector2(x + 20, y), edge)
+		draw_set_transform(Vector2.ZERO)
+		y += 74.0
 	_t(Vector2(x + 24, 990), "Пробел пауза · M звук · R заново", 13, Color(INK, 0.6))
 	_t(Vector2(x + 24, 1010), "F2 ускорить ×3 · F3 мысли ИИ", 13, Color(INK, 0.6))
 	_t(Vector2(x + 24, 1030), "Esc отмена меню", 13, Color(INK, 0.6))
+
+
+func _ability(k: String, p: Vector2, edge: bool) -> void:
+	var info: Array = BTN[k]
+	var on: bool = game.ability_unlocked(k)
+	var cd := 0.0
+	var cd_max := 1.0
+	var sub: String = info[3]
+	match k:
+		"throw":
+			cd = game.throw_cd
+			cd_max = game.THROW_CD
+		"ram":
+			cd = game.paw_bruise
+			cd_max = game.PAW_BRUISE
+			if not on:
+				sub = "откроется через %s" % mmss(game.RAM_UNLOCK - game.time)
+		"millet":
+			cd = game.millet_cd
+			cd_max = game.MILLET_CD
+			if not on:
+				sub = "ждёт первый крупный колосок"
+		"book":
+			cd = game.meteor_cd
+			cd_max = game.METEOR_CD
+			if not on:
+				sub = "откроется через %s" % mmss(game.BOOK_UNLOCK - game.time)
+		"basket":
+			cd = game.wave_cd
+			cd_max = game.WAVE_CD
+			if not on:
+				sub = "откроется через %s" % mmss(game.WAVE_UNLOCK - game.time)
+	_button(p, info[0], info[1], info[2], sub, cd, cd_max, on, edge and k != "throw")
 
 
 func _button(p: Vector2, icon: String, title: String, key: String, sub: String, cd: float, cd_max: float, unlocked: bool, glow: bool) -> void:
@@ -353,7 +434,7 @@ func _button(p: Vector2, icon: String, title: String, key: String, sub: String, 
 	if glow and ready:
 		var a := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.012)
 		Art.outline(self, Art.wobbly_rect(r.grow(4), Art.frame() + 5, 1.0), Color(0.9, 0.3, 0.2, a), 3.0)
-	Icons.draw(self, icon, r.position + Vector2(34, 33), 50.0, 1.0 if unlocked else 0.45)
+	Icons.draw(self, icon, r.position + Vector2(34, 33), 50.0, 1.0 if unlocked else 0.4)
 	_t(r.position + Vector2(68, 26), title, 17, INK if unlocked else Color(INK, 0.5))
 	var kw := Art.text_w(font, key, 13) + 12.0
 	var kr := Rect2(Vector2(r.end.x - kw - 8, r.position.y + 8), Vector2(kw, 20))
@@ -367,6 +448,36 @@ func _button(p: Vector2, icon: String, title: String, key: String, sub: String, 
 
 
 # ---------- поверх поля ----------
+
+func _draw_event_card(f: Dictionary) -> void:
+	var t: float = f["t"]
+	var k := clampf(t / 0.3, 0.0, 1.0)
+	var a := k * (1.0 - clampf((t - 2.4) / 0.6, 0.0, 1.0))
+	var sc := 0.7 + 0.3 * (1.0 - pow(1.0 - k, 3.0))
+	var c := Vector2(960, 290)
+	var r := Rect2(c - Vector2(260, 80) * sc, Vector2(520, 160) * sc)
+	Art.card(self, r, Color(1, 0.95, 0.8, 0.97 * a), Art.frame(), Color(INK, a), 3.0)
+	for i in 10:
+		var ang := TAU * i / 10.0 + Time.get_ticks_msec() * 0.001
+		Icons._star(self, c + Vector2(cos(ang) * 290.0, sin(ang) * 100.0) * sc, 6.0, Color("f6d84c"), a)
+	var type: String = f["type"]
+	Icons.draw(self, type, r.position + Vector2(64, 80) * sc, 84.0 * sc, a)
+	_t(r.position + Vector2(120, 50) * sc, "Ивент: " + String(Skills.EVENT_NAMES[type]), int(26 * sc), Color(0.55, 0.35, 0.05, a))
+	_t(r.position + Vector2(120, 82) * sc, Skills.EVENT_DESC[type], int(17 * sc), Color(INK, a))
+	_t(r.position + Vector2(120, 122) * sc, "Награда герою:", int(17 * sc), Color(INK, 0.8 * a))
+	Icons.draw(self, f["fruit"], r.position + Vector2(300, 116) * sc, 40.0 * sc, a)
+	_t(r.position + Vector2(328, 122) * sc, "+ опыт   ·   сорвите!", int(17 * sc), Color(0.7, 0.2, 0.15, a))
+
+
+func _draw_reward_fly(f: Dictionary) -> void:
+	var k: float = clampf(float(f["t"]) / float(f["dur"]), 0.0, 1.0)
+	var a: Vector2 = f["pos"]
+	var b: Vector2 = f["to"]
+	var mid := a.lerp(b, 0.5) + Vector2(0, -220)
+	var p := a.lerp(mid, k).lerp(mid.lerp(b, k), k)
+	Art.fill_blob(self, p, 30, 30, Color(1, 0.9, 0.4, 0.4 * (1.0 - k * 0.5)))
+	Icons.draw(self, f["fruit"], p, 46.0 + 10.0 * sin(k * PI), 1.0)
+
 
 func _draw_banners() -> void:
 	var y := 150.0
@@ -383,7 +494,7 @@ func _draw_banners() -> void:
 
 func _draw_vignettes(h: Hero) -> void:
 	var f: Rect2 = game.FIELD
-	if game.over == "" and h.hp_frac() < 0.2:
+	if game.over == "" and game.phase == "play" and h.hp_frac() < 0.2:
 		var a := 0.18 + 0.12 * sin(Time.get_ticks_msec() * 0.012)
 		_frame(f, Color(0.85, 0.15, 0.1, a), 26.0)
 		Art.text_c(self, font, Vector2(960, 110), "На волоске!", 28, Color(0.75, 0.15, 0.1, 0.9), Color(1, 0.97, 0.9, 0.9), 6)
@@ -407,27 +518,99 @@ func _overlay(title: String, sub: String) -> void:
 
 
 func _draw_end() -> void:
+	var o: Dictionary = game.outro
+	if not o.is_empty() and not bool(o["done"]):
+		# сначала — забрать яйцо или перья
+		var t: float = o["t"]
+		if t > 1.2:
+			var msg := "Кликните по яйцу: награда и вам, и попугаю" if game.over == "hero_dead" else "Кеша улетел. Соберите выпавшие перья"
+			Art.text_c(self, font, Vector2(960, 230), msg, 24, Color("8a5a1e"), Color(1, 0.98, 0.9, 0.95), 8)
+		return
 	draw_rect(game.FIELD, Color(0.2, 0.15, 0.1, 0.4))
-	var r := Rect2(620, 360, 680, 330)
+	var r := Rect2(560, 150, 800, 780)
 	Art.card(self, r, PANEL, Art.frame(), INK, 3.0)
 	var h: Hero = game.hero
 	if game.over == "hero_dead":
-		Art.text_c(self, font, Vector2(960, 424), "Попался!", 46, Color("b23a2e"))
-		Art.text_c(self, font, Vector2(960, 460), "Кеша повержен на %s" % mmss(game.time), 20, INK)
+		Art.text_c(self, font, Vector2(960, 212), "Попался!", 46, Color("b23a2e"))
+		Art.text_c(self, font, Vector2(960, 248), "Кеша повержен на %s" % mmss(game.time), 20, INK)
 	else:
-		Art.text_c(self, font, Vector2(960, 424), "Кеша выжил", 46, Color("4f8f3a"))
-		Art.text_c(self, font, Vector2(960, 460), "Все 5 минут. В следующий раз ловите его на жадности.", 18, INK)
-	var lines := [
-		"Ваш урон по герою: %d · загоны: %d" % [int(game.player_damage), game.combos],
-		"Книги попали: %d из %d · тараны: %d · броски в цель: %d" % [game.meteor_hits, game.meteors_cast, game.rams, game.throws_hit],
-		"Подмен проса сработало: %d · сорвано ивентов: %d · кормушек: %d" % [game.tricks, game.events_denied, game.chests_denied],
+		Art.text_c(self, font, Vector2(960, 212), "Кеша выжил", 46, Color("4f8f3a"))
+		Art.text_c(self, font, Vector2(960, 248), "Все 5 минут. В следующий раз ловите его на жадности.", 18, INK)
+	var y := 290.0
+	if not o.is_empty() and o["reward"].size() == 2:
+		Art.card(self, Rect2(600, y - 22, 720, 104), Color(1, 0.95, 0.8), Art.frame() + 2, INK, 2.0)
+		Art.text_c(self, font, Vector2(960, y + 2), "Из яйца — награда обоим:", 17, Color(INK, 0.7))
+		Art.text_c(self, font, Vector2(960, y + 32), "Попугаю: " + String(o["reward"][0]), 17, Color("4f8f3a"))
+		Art.text_c(self, font, Vector2(960, y + 60), "Вам: " + String(o["reward"][1]), 17, Color("6a4fb3"))
+		y += 112.0
+	var stats := [
+		"Ваш урон по герою: %d · загоны: %d · перьев всего: %d" % [int(game.player_damage), game.combos, int(game.save.get("feathers", 0))],
+		"Книги %d/%d · тараны %d · броски в цель %d · подмены %d · сорвано ивентов %d" % [game.meteor_hits, game.meteors_cast, game.rams, game.throws_hit, game.tricks, game.events_denied],
 		"Герой: уровень %d · ивентов %d · пылесос %s" % [h.level, h.events_done, "сломан" if game.boss_defeated else "цел"],
 	]
-	var y := 506.0
-	for s in lines:
-		Art.text_c(self, font, Vector2(960, y), s, 17, INK)
-		y += 28.0
-	Art.text_c(self, font, Vector2(960, 668), "R — новый забег", 17, Color(INK, 0.7))
+	for s in stats:
+		Art.text_c(self, font, Vector2(960, y), s, 16, INK)
+		y += 26.0
+	y += 12.0
+	_t(Vector2(600, y), "Что по Кеше било (за забег)", 17)
+	_t(Vector2(980, y), "Чем бил Кеша", 17)
+	y += 8.0
+	_shares_list(Vector2(600, y), game.dmg_by_src, Hero.SRC_TEXT, Color("c25b4a"))
+	_shares_list(Vector2(980, y), game.dealt_by_src, Skills.NAMES, Color("4f8f3a"))
+	y += 170.0
+	_t(Vector2(600, y), "Кеша запомнил (учится из забега в забег)", 17, Color("4f79a8"))
+	y += 24.0
+	var mem: Dictionary = game.save.get("memory", {})
+	var notes := _memory_lines(mem)
+	for s in notes:
+		_t(Vector2(600, y), "· " + s, 15, Color(INK, 0.85))
+		y += 22.0
+	Art.text_c(self, font, Vector2(960, 905), "R — новый забег", 18, Color(INK, 0.7))
+
+
+func _shares_list(p: Vector2, d: Dictionary, names: Dictionary, col: Color) -> void:
+	var tot := 0.0
+	for k in d:
+		tot += float(d[k])
+	if tot <= 0.0:
+		_t(p + Vector2(0, 22), "—", 15, Color(INK, 0.5))
+		return
+	var keys := d.keys()
+	keys.sort_custom(func(a, b): return float(d[a]) > float(d[b]))
+	for i in mini(6, keys.size()):
+		var k: String = keys[i]
+		var sh := float(d[k]) / tot
+		var y := p.y + 20.0 + i * 24.0
+		draw_rect(Rect2(p.x, y - 13, 150.0 * sh, 16), Color(col, 0.35))
+		_t(Vector2(p.x + 4, y), "%s  %d%%" % [String(names.get(k, k)), int(round(sh * 100.0))], 14)
+
+
+func _memory_lines(mem: Dictionary) -> Array[String]:
+	var out: Array[String] = []
+	var taken: Dictionary = mem.get("taken", {})
+	var dealt: Dictionary = mem.get("dealt", {})
+	if taken.is_empty():
+		out.append("пока ничего — память наполнится после этого забега")
+		return out
+	var tk := taken.keys()
+	tk.sort_custom(func(a, b): return float(taken[a]) > float(taken[b]))
+	var parts: Array[String] = []
+	for k in tk.slice(0, 3):
+		parts.append("%s %d%%" % [String(Hero.SRC_TEXT.get(k, k)), int(round(float(taken[k]) * 100.0))])
+	out.append("чаще всего бьют: " + ", ".join(parts) + " — следит за этим внимательнее")
+	var dk := dealt.keys()
+	dk.sort_custom(func(a, b): return float(dealt[a]) > float(dealt[b]))
+	var best: Array[String] = []
+	for k in dk:
+		if k != "peck" and best.size() < 2:
+			best.append(String(Skills.NAMES.get(k, k)))
+	if best.size() > 0:
+		out.append("лучше всего заходят: " + ", ".join(best) + " — будет брать охотнее")
+	var trick := float(taken.get("trap", 0.0)) + float(taken.get("rotten", 0.0)) + float(taken.get("missile", 0.0))
+	if trick > 0.05:
+		out.append("крупное просо подозрительное — доверяет ему меньше")
+	out.append("забегов в памяти: %d" % int(mem.get("runs", 0)))
+	return out
 
 
 func _draw_paw(fr: int) -> void:
@@ -437,18 +620,35 @@ func _draw_paw(fr: int) -> void:
 		draw_line(Vector2(tr["a"]) + off, Vector2(tr["b"]) + off, Color(INK, 0.35 * a), 2.0, true)
 	var p: Vector2 = game.paw["pos"] + off
 	var bruised: bool = game.paw_bruise > 0.0
+	var holding: bool = game.held_e != null
+	var m := get_global_mouse_position()
 	if bruised:
-		var m := get_global_mouse_position()
 		draw_dashed_line(p, m, Color(INK, 0.35), 1.5, 6.0)
 		draw_circle(m, 3.0, Color(INK, 0.4))
-	var holding: bool = game.held_e != null
+	if holding:
+		# рогатка: куда полетит носок и с какой силой
+		var v: Vector2 = game.throw_vector()
+		if v != Vector2.ZERO:
+			var end := p + v.normalized() * (40.0 + v.length() * 0.12)
+			draw_dashed_line(p, end, Color(0.42, 0.31, 0.7, 0.9), 3.0, 8.0)
+			draw_polyline(PackedVector2Array([end + v.normalized().rotated(2.5) * 14.0, end, end + v.normalized().rotated(-2.5) * 14.0]), Color(0.42, 0.31, 0.7, 0.9), 3.0)
+		var k: float = clampf(game.hold_t / game.HOLD_TIME, 0.0, 1.0)
+		var br := Rect2(p + Vector2(-26, -44), Vector2(52, 7))
+		draw_rect(br, Color(1, 1, 1, 0.85))
+		draw_rect(Rect2(br.position, Vector2(br.size.x * k, br.size.y)), Color("e0a92e") if k > 0.35 else Color("d95c4a"))
+		draw_rect(br, INK, false, 1.5)
 	var fill := Color("d9dbe8") if bruised else Color("fffaf2")
 	var sd := 77 + fr
-	var curl := 4.0 if holding else 0.0
+	# поджатые пальцы: идёт откат броска или лапка держит носок
+	var curl := 0.0
+	if holding:
+		curl = 4.0
+	elif game.throw_cd > 0.0:
+		curl = 2.0 + 2.0 * clampf(game.throw_cd / game.THROW_CD, 0.0, 1.0)
 	var toes := [Vector2(-13, -10), Vector2(-5, -17), Vector2(5, -17), Vector2(13, -10)]
 	for k in 4:
-		var tp: Vector2 = p + Vector2(toes[k]) * (1.0 - curl * 0.04) + Vector2(0, curl)
-		Art.blob(self, tp, 5.5, 6.0, fill, 3.0, sd + k)
+		var tp: Vector2 = p + Vector2(toes[k]) * (1.0 - curl * 0.05) + Vector2(0, curl)
+		Art.blob(self, tp, 5.5, 6.0 - curl * 0.3, fill, 3.0, sd + k)
 		draw_circle(tp + Vector2(0, 1), 2.4, Color("f3a7b5"))
 	Art.blob(self, p + Vector2(0, 4), 15.0, 12.5, fill, 3.0, sd)
 	Art.fill_blob(self, p + Vector2(0, 6), 7.0, 5.5, Color("f3a7b5"))

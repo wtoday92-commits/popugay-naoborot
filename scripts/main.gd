@@ -12,11 +12,15 @@ const BOSS_AT := 240.0
 const EVENT_SLOTS := [40.0, 95.0, 150.0, 200.0]
 const EVENT_WARN := 10.0
 const GLOW_NEED := 5
-const METEOR_CD := 12.0
+const METEOR_CD := 10.0
 const METEOR_DELAY := 1.2
 const METEOR_R := 2.5 * M
-const WAVE_UNLOCK := 90.0
-const WAVE_CD := 40.0
+const WAVE_UNLOCK := 180.0
+const BOOK_UNLOCK := 120.0
+const HOLD_TIME := 2.5
+const HELD_SPEED := 230.0
+const INTRO_TIME := 2.8
+const WAVE_CD := 35.0
 const RAM_UNLOCK := 20.0
 const RAM_SPEED := 1500.0
 const MILLET_CD := 30.0
@@ -26,7 +30,7 @@ const PAW_PUSH_MAX := 12
 const PAW_BRUISE := 4.0
 const PAW_BRUISED_SPEED := 380.0
 const GRAB_R := 28.0
-const THROW_CD := 4.0
+const THROW_CD := 3.0
 const MAX_ENEMIES := 170
 const MAX_GEMS := 400
 const CELL := 40.0
@@ -98,6 +102,19 @@ var meteor_cd := 0.0
 var wave_cd := 0.0
 var millet_cd := 0.0
 var throw_cd := 0.0
+var hold_t := 0.0
+var millet_unlocked := false
+var phase := "play"
+var intro_t := 0.0
+var outro := {}
+var tut := {}
+var save := {}
+var first_run := true
+var dealt_by_src := {}
+var unlock_seen := {}
+var learn := false
+var die_at := -1.0
+var win_at := -1.0
 var paw := {"id": 0, "pos": Vector2(960, 700), "born": 0.0}
 var paw_vel := Vector2.ZERO
 var paw_bruise := 0.0
@@ -163,12 +180,22 @@ func _ready() -> void:
 	sim = args.has("--sim")
 	sim_bot = not args.has("--nobot")
 	selftest = args.has("--selftest")
+	learn = args.has("--learn")
 	full_bot = args.has("--fullbot")
 	for a in args:
 		if a.begins_with("--shot="):
 			shot_at = float(a.substr(7))
+		if a.begins_with("--die="):
+			die_at = float(a.substr(6))
+		if a.begins_with("--win="):
+			win_at = float(a.substr(6))
 	for f in furniture:
 		obstacles.append(f[0])
+	if sim:
+		Save.path = "user://save_sim.json"
+	if shot_at > 0.0:
+		Save.path = "user://save_shot.json"
+	save = Save.defaults() if (sim and not learn) or shot_at > 0.0 else Save.load_data()
 	world = WorldView.new()
 	world.game = self
 	add_child(world)
@@ -249,9 +276,29 @@ func start_run() -> void:
 	paw["id"] = new_id()
 	hero = Hero.new(self)
 	hero.pos = Vector2(900, 660)
+	if hud != null:
+		hud.reset()
+	throw_cd = 0.0
+	hold_t = 0.0
+	millet_unlocked = false
+	outro = {}
+	tut = {}
+	dealt_by_src = {}
+	unlock_seen = {}
+	first_run = int(save.get("runs", 0)) == 0 and not sim
+	if not sim or learn:
+		hero.learn(save.get("memory", {}))
+	if sim:
+		phase = "play"
+	else:
+		# влёт: попугай залетает из-за края экрана, таймер ещё стоит
+		phase = "intro"
+		intro_t = 0.0
+		hero.pos = Vector2(FIELD.position.x - 80, 120)
 	Engine.time_scale = game_speed
 	add_thought("Цели: выжить 5 минут, открыть 2 кормушки, пройти 3 ивента.")
-	show_hint("Лапка толкает носки. Зажмите ЛКМ на носке и бросьте его в попугая.", 7.0)
+	for note in hero.memory_notes:
+		add_thought(note)
 
 
 # ---------- цикл ----------
@@ -275,10 +322,22 @@ func _process(delta: float) -> void:
 	if not sim:
 		world.queue_redraw()
 		hud.queue_redraw()
-	if shot_at > 0.0 and time > shot_at - 0.8 and meteor_cd <= 0.0:
+	if shot_at > 0.0 and time > shot_at - 0.8 and meteor_cd <= 0.0 and time > BOOK_UNLOCK:
 		paw["pos"] = hero.pos + Vector2(60, 20)
 		cast_meteor()
-	if shot_at > 0.0 and time >= shot_at:
+	if die_at > 0.0 and time >= die_at and over == "":
+		hero.hp = 0.0
+		hero_died()
+	if win_at > 0.0 and time >= win_at and over == "":
+		time = RUN_LENGTH
+		over = "survived"
+		_begin_outro()
+	var shot_clock := time + (float(outro.get("t", 0.0)) if not outro.is_empty() else 0.0)
+	if shot_at > 0.0 and not outro.is_empty() and float(outro["t"]) > 2.6 and shot_at - time > 4.0:
+		for it in outro["items"]:
+			if not it["got"]:
+				_outro_click(it["pos"])
+	if shot_at > 0.0 and shot_clock >= shot_at:
 		# отладочный снимок экрана: `-- --shot=<сек>`
 		shot_at = -1.0
 		await RenderingServer.frame_post_draw
@@ -286,8 +345,18 @@ func _process(delta: float) -> void:
 		print("SHOT ", ProjectSettings.globalize_path("user://shot.png"))
 		get_tree().quit()
 		return
-	if paused or over != "":
+	_apply_time_scale()
+	if phase == "intro":
+		if not paused:
+			_update_intro(real_dt)
 		return
+	if over != "":
+		_update_outro(real_dt)
+		return
+	if paused:
+		return
+	if not tut.is_empty():
+		_update_tut(real_dt)
 	_step(delta)
 
 
@@ -323,14 +392,16 @@ func _step(delta: float) -> void:
 	if time >= RUN_LENGTH and over == "":
 		over = "survived"
 		_write_log("герой выжил")
+		_begin_outro()
 		add_thought("Пять минут! Я выжил.")
 		sfx("fail")
 
 
 func _timed_hints() -> void:
 	var list := [
+		[0.5, "throw", "Зажмите ЛКМ на носке: он тяжёлый. Потяните мышь в сторону попугая и отпустите."],
 		[RAM_UNLOCK, "ram", "Таран! Резко махните лапкой в попугая: он оглохнет на полсекунды."],
-		[12.0, "millet", "Кликните ЛКМ по крупному колоску: капкан, тухлое, яйцо или снаряд. Попугай не видит подмены."],
+		[BOOK_UNLOCK, "book", "Q — уронить книгу с полки туда, где лапка. Тень видна 1,2 с."],
 		[WAVE_UNLOCK, "wave", "W — опрокинуть корзину белья у стены, к которой ближе лапка."],
 		[EVENT_SLOTS[0] - 25.0, "queue", "Ивенты слева можно перетаскивать, пока они не начались."],
 	]
@@ -338,8 +409,13 @@ func _timed_hints() -> void:
 		if time >= float(h[0]) and not hints_shown.has(h[1]):
 			hints_shown[h[1]] = true
 			show_hint(h[2], 7.0)
-			if h[1] == "wave":
-				banner("Новая кнопка: корзина белья [W]", Color("6a4fb3"), 30, 2.5)
+			match h[1]:
+				"ram":
+					unlock_ability("ram")
+				"book":
+					unlock_ability("book")
+				"wave":
+					unlock_ability("basket")
 
 
 func _unhandled_input(event_in: InputEvent) -> void:
@@ -379,6 +455,8 @@ func _unhandled_input(event_in: InputEvent) -> void:
 func _mouse_button(mb: InputEventMouseButton) -> void:
 	var p: Vector2 = paw["pos"]
 	if mb.button_index == MOUSE_BUTTON_RIGHT:
+		if phase != "play":
+			return
 		if mb.pressed and (not menu.is_empty() or not aim.is_empty()):
 			menu = {}
 			aim = {}
@@ -389,6 +467,11 @@ func _mouse_button(mb: InputEventMouseButton) -> void:
 			_release_grab()
 		return
 	if mb.button_index != MOUSE_BUTTON_LEFT:
+		return
+	if mb.pressed and _try_block(p):
+		return
+	if mb.pressed and not outro.is_empty():
+		_outro_click(p)
 		return
 	if mb.pressed:
 		if p.x < FIELD.position.x:
@@ -402,7 +485,7 @@ func _mouse_button(mb: InputEventMouseButton) -> void:
 		if not menu.is_empty():
 			_menu_click(p)
 			return
-		if millet_cd <= 0.0:
+		if millet_cd <= 0.0 and millet_unlocked:
 			var g = _gem_at(p)
 			if g != null:
 				menu = {"gem": g, "t": 0.0}
@@ -427,6 +510,13 @@ func _update_paw(dt: float) -> void:
 		paw_bruise = maxf(0.0, paw_bruise - dt)
 		# ушибленная лапка отстаёт от мыши
 		p = old.move_toward(m, PAW_BRUISED_SPEED * dt)
+	if held_e != null:
+		# носок тяжёлый: лапка ползёт медленно, а на бросок есть пара секунд
+		p = old.move_toward(m, HELD_SPEED * dt)
+		if not paused and over == "":
+			hold_t -= dt
+			if hold_t <= 0.0:
+				_drop_held()
 	paw["pos"] = p
 	if not menu.is_empty():
 		menu["t"] = float(menu["t"]) + dt
@@ -440,7 +530,7 @@ func _update_paw(dt: float) -> void:
 		tr["t"] = float(tr["t"]) - dt
 	paw_trail = paw_trail.filter(func(tr): return float(tr["t"]) > 0.0)
 	if held_e != null:
-		held_e.pos = p + Vector2(0, 16) + Vector2(sin(time * 20.0) * 3.0, 0)
+		held_e.pos = p + Vector2(0, 18) + Vector2(sin(Time.get_ticks_msec() * 0.02) * 3.0, 0)
 	if not paused and over == "" and hero != null and held_e == null:
 		_check_ram(old, p, v)
 
@@ -530,22 +620,42 @@ func _try_grab(p: Vector2) -> void:
 	if best == null:
 		return
 	held_e = best
+	hold_t = HOLD_TIME
 	enemies.erase(best)
 	best.push_vel = Vector2.ZERO
 	sfx("grab", -4.0, randf_range(0.9, 1.1))
 
 
-func _release_grab() -> void:
+func _drop_held() -> void:
 	if held_e == null:
 		return
 	var e := held_e
 	held_e = null
-	var v := paw_vel.limit_length(1500.0)
-	if v.length() < 260.0:
-		e.stun = 0.4
-		e.pos = resolve_circle(e.pos, e.radius)
-		enemies.append(e)
+	e.stun = 0.4
+	e.pos = resolve_circle(e.pos, e.radius)
+	enemies.append(e)
+	throw_cd = 1.0
+	sfx("bounce", -10.0, 0.7)
+
+
+## Бросок как из рогатки: носок летит туда, куда тянет мышь от лапки.
+func throw_vector() -> Vector2:
+	var m := get_global_mouse_position()
+	var pull: Vector2 = m - Vector2(paw["pos"])
+	if pull.length() < 6.0:
+		return Vector2.ZERO
+	return pull.normalized() * clampf(pull.length() * 7.0, 320.0, 1300.0)
+
+
+func _release_grab(v_override: Vector2 = Vector2.ZERO) -> void:
+	if held_e == null:
 		return
+	var v := v_override if v_override != Vector2.ZERO else throw_vector()
+	if v.length() < 260.0:
+		_drop_held()
+		return
+	var e := held_e
+	held_e = null
 	throw_cd = THROW_CD
 	thrown.append({"id": new_id(), "pos": e.pos, "vel": v, "e": e, "born": time, "spin": 0.0, "dodged": false})
 	log_event("ИГРОК", "бросок: %s" % EDEFS[e.type]["name"])
@@ -626,6 +736,7 @@ func _menu_click(p: Vector2) -> void:
 				g["mod"] = kind
 				log_event("ИГРОК", "подмена проса: %s" % MENU_NAMES[kind])
 				millet_cd = MILLET_CD
+				_finish_tut("millet")
 				add_fx({"kind": "sparkle", "pos": g["pos"], "dur": 0.5})
 			return
 	menu = {}
@@ -641,6 +752,7 @@ func _launch_missile(p: Vector2) -> void:
 	if dir == Vector2.ZERO:
 		dir = Vector2.RIGHT
 	missiles.append({"id": new_id(), "pos": g["pos"], "vel": dir * 7.0 * M, "bounces": 5, "born": time, "life": 14.0})
+	_finish_tut("millet")
 	log_event("ИГРОК", "просо-снаряд")
 	millet_cd = MILLET_CD
 	sfx("throw", 0.0, 0.8)
@@ -681,7 +793,7 @@ func _update_missiles(delta: float) -> void:
 # ---------- кнопки игрока ----------
 
 func cast_meteor() -> void:
-	if over != "" or paused or meteor_cd > 0.0:
+	if over != "" or paused or meteor_cd > 0.0 or phase != "play" or time < BOOK_UNLOCK:
 		return
 	var p: Vector2 = paw["pos"]
 	if not sim and not FIELD.has_point(p):
@@ -1149,9 +1261,11 @@ func src_label(e: Enemy) -> String:
 	return n + " из вашей волны" if e.from_player else n
 
 
-func damage_enemy(e: Enemy, amount: float, kb: Vector2, show: bool = true) -> void:
+func damage_enemy(e: Enemy, amount: float, kb: Vector2, show: bool = true, src: String = "") -> void:
 	if e.dead:
 		return
+	if src != "":
+		dealt_by_src[src] = float(dealt_by_src.get(src, 0.0)) + minf(amount, maxf(e.hp, 0.0))
 	e.hp -= amount
 	if show:
 		e.flash = 0.1
@@ -1207,6 +1321,11 @@ func _kill(e: Enemy) -> void:
 func _drop_gem(p: Vector2, big: bool, glow: bool = false) -> Dictionary:
 	var g := {"id": new_id(), "pos": p, "big": big, "glow": glow, "xp": 5 if big else 1, "born": time, "taken": false}
 	gems.append(g)
+	if big and not glow and not millet_unlocked:
+		millet_unlocked = true
+		unlock_ability("millet")
+		if not sim and not bool(save.get("tut_millet", false)):
+			tut = {"kind": "millet", "gem": g, "t": 0.0}
 	return g
 
 
@@ -1243,7 +1362,7 @@ func _update_shots(delta: float) -> void:
 			if hit.has(e.id) or np.distance_to(e.pos) > e.radius + 6.0:
 				continue
 			hit.append(e.id)
-			damage_enemy(e, float(s["dmg"]), v.normalized() * 80.0)
+			damage_enemy(e, float(s["dmg"]), v.normalized() * 80.0, true, "feather")
 			if s["ice"]:
 				e.slow = 1.5
 			s["pierce"] = int(s["pierce"]) - 1
@@ -1461,7 +1580,7 @@ func _update_events(delta: float) -> void:
 
 func _start_event(type: String) -> void:
 	log_event("ИВЕНТ", "начался: %s" % Skills.EVENT_NAMES[type])
-	event = {"type": type, "id": new_id(), "born": time, "left": 30.0}
+	event = {"type": type, "id": new_id(), "born": time, "left": 30.0, "fruit": Skills.FRUITS[randi() % Skills.FRUITS.size()]}
 	match type:
 		"circle":
 			event["pos"] = random_floor_point(140.0)
@@ -1480,12 +1599,15 @@ func _start_event(type: String) -> void:
 		"altar":
 			event["left"] = 20.0
 			event["pos"] = random_floor_point(100.0)
-	banner(Skills.EVENT_NAMES[type] + "!", Color("b07a1e"), 34, 2.0)
+	add_fx({"kind": "event_card", "pos": Vector2(960, 300), "dur": 3.0, "type": type, "fruit": event["fruit"]})
 	sfx("event")
 
 
 func _event_reward() -> String:
-	var f: String = Skills.FRUITS[randi() % Skills.FRUITS.size()]
+	var f: String = event.get("fruit", Skills.FRUITS[randi() % Skills.FRUITS.size()])
+	var from: Vector2 = event["pos"] if event.has("pos") else hero.pos
+	add_fx({"kind": "confetti", "pos": from, "dur": 1.4})
+	add_fx({"kind": "reward_fly", "pos": from, "to": Vector2(48 + hero.fruits.size() * 56, 506), "dur": 1.1, "fruit": f})
 	hero.add_fruit(f)
 	hero.xp += 15 + 3 * hero.level
 	return f
@@ -1498,8 +1620,8 @@ func _event_success() -> void:
 	hero.events_done += 1
 	_mark_result("ok")
 	add_thought("%s: готово! Получил %s." % [Skills.EVENT_NAMES[event["type"]], String(Skills.FRUIT_NAMES[f]).to_lower()])
-	banner("Герой прошёл ивент: +%s" % String(Skills.FRUIT_NAMES[f]).to_lower(), Color("8a5a1e"), 26, 2.0)
-	sfx("chime")
+	banner("Кеша прошёл ивент: +%s!" % String(Skills.FRUIT_NAMES[f]).to_lower(), Color("8a5a1e"), 30, 2.4)
+	sfx("win", -6.0)
 	_end_event()
 
 
@@ -1508,7 +1630,8 @@ func _event_fail() -> void:
 	_mark_result("skip" if ok_ignore else "fail")
 	if not ok_ignore:
 		events_denied += 1
-		banner("СОРВАНО: %s" % Skills.EVENT_NAMES[event["type"]], Color("b23a2e"), 32, 2.2)
+		banner("СОРВАНО: %s" % Skills.EVENT_NAMES[event["type"]], Color("b23a2e"), 34, 2.4)
+		add_fx({"kind": "stamp", "pos": event["pos"] if event.has("pos") else hero.pos, "dur": 2.0})
 		add_thought("Не успел: %s. Обидно." % Skills.EVENT_NAMES[event["type"]])
 		sfx("fail")
 	else:
@@ -1575,9 +1698,10 @@ func on_fruit_eaten(f: String) -> void:
 
 # ---------- левелап героя: замедление и видимый выбор ----------
 
-const LU_SLOW := 2.6
-const LU_PICK := 1.8
-const LU_END := 4.2
+const LU_BLOCK := 1.5
+const LU_PICK := 2.4
+const LU_SLOW := 3.2
+const LU_END := 4.8
 
 
 func _make_cards() -> Array:
@@ -1619,21 +1743,78 @@ func begin_levelup() -> void:
 		scored.append(r)
 		if float(r["score"]) > float(scored[best]["score"]):
 			best = i
-	levelup = {"cards": cards, "scores": scored, "chosen": best, "t": 0.0, "applied": false, "level": hero.level}
+	var tut_block: bool = not sim and not bool(save.get("tut_block", false)) and cards.size() > 1
+	levelup = {"cards": cards, "scores": scored, "chosen": best, "t": 0.0, "applied": false, "level": hero.level, "blocked": -1, "tut": tut_block}
 	hero.choosing = true
 	sfx("level", -4.0)
 
 
+func _apply_time_scale() -> void:
+	var k := 1.0
+	if not levelup.is_empty() and float(levelup["t"]) < LU_SLOW:
+		k = 0.3
+		if bool(levelup["tut"]) and int(levelup["blocked"]) < 0:
+			k = 0.03
+	if not tut.is_empty():
+		k = 0.04
+	if over != "" or phase == "intro":
+		k = 1.0
+	Engine.time_scale = game_speed * k
+
+
+## Позиция карты выбора на кольце вокруг попугая (для рисования и кликов игрока).
+func levelup_card_pos(i: int) -> Vector2:
+	var n: int = levelup["cards"].size()
+	var t: float = levelup["t"]
+	var ring := 130.0 * (0.6 + 0.4 * clampf(t / 0.3, 0.0, 1.0))
+	var a := -PI * 0.5 + TAU * float(i) / float(n)
+	return hero.pos + Vector2(cos(a), sin(a)) * ring
+
+
+## Окно игрока: пока попугай думает, можно ткнуть в одну карту и запретить её.
+func levelup_block_open() -> bool:
+	if levelup.is_empty() or int(levelup["blocked"]) >= 0:
+		return false
+	return bool(levelup["tut"]) or float(levelup["t"]) < LU_BLOCK
+
+
+func _try_block(p: Vector2) -> bool:
+	if not levelup_block_open():
+		return false
+	for i in levelup["cards"].size():
+		if p.distance_to(levelup_card_pos(i)) < 38.0:
+			levelup["blocked"] = i
+			var c: Dictionary = levelup["cards"][i]
+			var best := -1
+			for j in levelup["cards"].size():
+				if j != i and (best < 0 or float(levelup["scores"][j]["score"]) > float(levelup["scores"][best]["score"])):
+					best = j
+			var was_fav: bool = int(levelup["chosen"]) == i
+			if best >= 0:
+				levelup["chosen"] = best
+			if was_fav:
+				hero.say("Эй! Я хотел %s!" % String(Skills.NAMES[c["key"]]))
+			log_event("ИГРОК", "запрет умения: %s" % Skills.NAMES[c["key"]])
+			sfx("trap", -4.0, 1.3)
+			if bool(levelup["tut"]):
+				# после обучения время идёт дальше с начала окна выбора
+				levelup["t"] = LU_BLOCK
+				save["tut_block"] = true
+				Save.store(save)
+			return true
+	return false
+
+
 func _update_levelup(real_dt: float) -> void:
-	if levelup.is_empty():
-		if not paused:
-			Engine.time_scale = game_speed
+	if levelup.is_empty() or paused or over != "":
 		return
-	if paused or over != "":
-		return
+	if bool(levelup["tut"]) and int(levelup["blocked"]) < 0 and float(levelup["t"]) >= 0.4:
+		levelup["wait"] = float(levelup.get("wait", 0.0)) + real_dt
+		if shot_at > 0.0 and float(levelup["wait"]) > 1.0:
+			_try_block(levelup_card_pos(0))
+		return # обучение: ждём, пока игрок ткнёт в карту
 	levelup["t"] = float(levelup["t"]) + real_dt
 	var t: float = levelup["t"]
-	Engine.time_scale = game_speed * (0.3 if t < LU_SLOW else 1.0)
 	if t >= LU_PICK and not levelup.has("picked"):
 		levelup["picked"] = true
 		sfx("chime", -6.0)
@@ -1694,8 +1875,9 @@ func hero_died() -> void:
 		return
 	over = "hero_dead"
 	_write_log("герой повержен")
+	_begin_outro()
 	hero.say("...Попался.")
-	banner("ПОПАЛСЯ!", Color("b23a2e"), 56, 99.0)
+	banner("ПОПАЛСЯ!", Color("b23a2e"), 56, 3.0)
 	sfx("win")
 
 
@@ -1752,7 +1934,7 @@ func _update_fx(delta: float) -> void:
 			var b: Vector2 = f["to"]
 			for e in enemies_near(a.lerp(b, 0.5), a.distance_to(b) * 0.5 + 20.0, 999):
 				if seg_dist(e.pos, a, b) < e.radius + 12.0:
-					damage_enemy(e, float(f["dps"]) * delta, Vector2.ZERO, false)
+					damage_enemy(e, float(f["dps"]) * delta, Vector2.ZERO, false, "mirror")
 	fx = fx.filter(func(f): return float(f["t"]) < float(f["dur"]))
 	for t in texts:
 		t["t"] = float(t["t"]) + delta
@@ -1795,7 +1977,7 @@ func _sim_step() -> void:
 		return
 	if selftest:
 		_selftest_step()
-	if sim_bot and over == "" and meteor_cd <= 0.0 and time > 5.0:
+	if sim_bot and over == "" and meteor_cd <= 0.0 and time > BOOK_UNLOCK:
 		paw["pos"] = hero.pos + hero.vel * 0.8 + Vector2(randf_range(-30, 30), randf_range(-30, 30))
 		cast_meteor()
 	if full_bot and over == "":
@@ -1819,7 +2001,7 @@ func _sim_step() -> void:
 func _selftest_step() -> void:
 	var steps := [
 		[3.0, "queue"], [8.0, "throw"], [12.0, "trap"], [20.0, "rotten"], [28.0, "egg"],
-		[36.0, "missile"], [45.0, "throw"], [62.0, "wave"], [70.0, "meteor"],
+		[36.0, "missile"], [45.0, "throw"], [125.0, "meteor"], [182.0, "wave"],
 	]
 	for st in steps:
 		var key := "%s@%d" % [st[1], int(st[0])]
@@ -1835,9 +2017,8 @@ func _selftest_step() -> void:
 				var s := spawn_enemy(Enemy.T.SOCK, resolve_circle(hero.pos + Vector2(160, 0), 11.0))
 				_build_grid()
 				_try_grab(s.pos)
-				paw_vel = (hero.pos - s.pos).normalized() * 1200.0
 				var held := held_e != null
-				_release_grab()
+				_release_grab((hero.pos - s.pos).normalized() * 1200.0)
 				print("ТЕСТ бросок: схватил=%s, летит=%d" % [held, thrown.size()])
 			"trap", "rotten", "egg":
 				var g := _drop_gem(resolve_circle(hero.pos + hero.heading * 30.0, 6.0), true)
@@ -1861,7 +2042,7 @@ func _selftest_step() -> void:
 				meteor_cd = 0.0
 				cast_meteor()
 				print("ТЕСТ книга: %d" % meteors.size())
-	if over != "" or time > 90.0:
+	if over != "" or time > 190.0:
 		print("ТЕСТ итог: бросков в цель %d, подмен сработало %d, урон игрока %d, урон по герою %s" % [throws_hit, tricks, int(player_damage), str(dmg_by_src)])
 		get_tree().quit()
 
@@ -1905,10 +2086,9 @@ func _full_bot() -> void:
 				_try_grab(e.pos)
 				if held_e != null:
 					var aim := hero.pos + hero.vel * 0.3 + Vector2(randf_range(-40, 40), randf_range(-40, 40))
-					paw_vel = (aim - held_e.pos).normalized() * 1200.0
-					_release_grab()
+					_release_grab((aim - held_e.pos).normalized() * 1200.0)
 				break
-	if millet_cd <= 0.0 and time > 10.0:
+	if millet_cd <= 0.0 and millet_unlocked:
 		for g in gems:
 			if g["big"] and not g["glow"] and not g.has("mod") and Vector2(g["pos"]).distance_to(hero.pos) < 6.0 * M:
 				g["mod"] = ["trap", "rotten", "egg"][randi() % 3]
@@ -1917,3 +2097,210 @@ func _full_bot() -> void:
 	if wave_cd <= 0.0 and time >= WAVE_UNLOCK:
 		paw["pos"] = hero.pos
 		cast_wave()
+	if not millet_unlocked:
+		return
+
+
+
+# ---------- влёт, обучение, кнопки по ходу забега ----------
+
+const ABILITY_ORDER := ["throw", "ram", "millet", "book", "basket"]
+
+
+func ability_unlocked(k: String) -> bool:
+	match k:
+		"throw":
+			return true
+		"ram":
+			return time >= RAM_UNLOCK
+		"millet":
+			return millet_unlocked
+		"book":
+			return time >= BOOK_UNLOCK
+		"basket":
+			return time >= WAVE_UNLOCK
+	return false
+
+
+## Когда кнопка открывается: в первом забеге она появляется с анимацией, потом видна серой заранее.
+func ability_visible(k: String) -> bool:
+	return not first_run or ability_unlocked(k)
+
+
+func unlock_ability(k: String) -> void:
+	if unlock_seen.has(k):
+		return
+	unlock_seen[k] = Time.get_ticks_msec() / 1000.0
+	var names := {"ram": "таран лапкой", "millet": "подмена проса", "book": "книга с полки [Q]", "basket": "корзина белья [W]"}
+	if names.has(k) and not sim:
+		banner("Новое умение: " + String(names[k]), Color("6a4fb3"), 30, 2.4)
+		sfx("level", -8.0, 1.2)
+
+
+func _update_intro(dt: float) -> void:
+	intro_t += dt
+	var k := clampf(intro_t / (INTRO_TIME - 0.6), 0.0, 1.0)
+	var e := 1.0 - pow(1.0 - k, 3.0)
+	var a := Vector2(FIELD.position.x - 80, 120)
+	var b := Vector2(900, 660)
+	var mid := Vector2(700, 200)
+	hero.pos = a.lerp(mid, e).lerp(mid.lerp(b, e), e)
+	hero.heading = (b - a).normalized()
+	hero.bob += dt * 20.0
+	if intro_t >= INTRO_TIME:
+		phase = "play"
+		hero.pos = b
+		banner("Старт!", Color("4f8f3a"), 44, 1.4)
+		sfx("gong", -6.0, 1.3)
+		hero.say("Ну, поехали.")
+
+
+func _update_tut(dt: float) -> void:
+	tut["t"] = float(tut["t"]) + dt
+	if shot_at > 0.0 and float(tut["t"]) > 1.5:
+		_finish_tut(tut["kind"])
+		return
+	if tut["kind"] == "millet" and bool(tut["gem"]["taken"]):
+		_finish_tut("millet")
+
+
+func _finish_tut(kind: String) -> void:
+	if tut.is_empty() or tut["kind"] != kind:
+		return
+	tut = {}
+	if kind == "millet":
+		save["tut_millet"] = true
+		Save.store(save)
+
+
+# ---------- финал: улёт попугая, яйцо или перья ----------
+
+const EGG_HERO := [
+	"новый класс попугая: Жако (скоро)",
+	"новый класс попугая: Какаду (скоро)",
+	"новый класс попугая: Какапо (скоро)",
+	"мешок проса для прокачки",
+	"особый квест на следующий забег",
+]
+const EGG_PLAYER := [
+	"+3 пера",
+	"прогресс нового умения лапки",
+	"новая внешка курсора (скоро)",
+	"+5 перьев",
+]
+
+
+func _begin_outro() -> void:
+	held_e = null
+	menu = {}
+	aim = {}
+	levelup = {}
+	tut = {}
+	if not event.is_empty():
+		_end_event()
+	if sim:
+		_save_run()
+		return
+	outro = {"t": 0.0, "start": hero.pos, "items": [], "opened": false, "reward": [], "done": false}
+	var won: bool = over == "hero_dead"
+	if won:
+		hero.hp = 1.0
+		outro["items"].append({"kind": "egg", "pos": hero.pos, "vel": Vector2(0, -60), "landed": false, "got": false})
+		hero.say("Аааа! Улетаю!")
+	else:
+		for i in 3:
+			outro["items"].append({"kind": "feather", "pos": hero.pos + Vector2(randf_range(-30, 30), 0), "vel": Vector2(randf_range(-40, 40), -40), "landed": false, "got": false, "sway": randf() * TAU})
+		hero.say("Пять минут! Я молодец, улетаю.")
+	_save_run()
+
+
+func _update_outro(dt: float) -> void:
+	if outro.is_empty():
+		return
+	outro["t"] = float(outro["t"]) + dt
+	var t: float = outro["t"]
+	_update_fx(dt)
+	var won: bool = over == "hero_dead"
+	# попугай улетает: при поражении — в панике прямо вверх, при победе — гордо вбок и вверх
+	var v := Vector2(0, -60.0 - 900.0 * t) if won else Vector2(260.0 + 200.0 * t, -220.0 - 300.0 * t)
+	hero.pos += v * dt
+	hero.heading = v.normalized()
+	hero.bob += dt * 30.0
+	if won and int(t * 10.0) % 2 == 0:
+		add_fx({"kind": "poof", "pos": hero.pos + Vector2(randf_range(-10, 10), 10), "dur": 0.6, "col": Color("7cc46a"), "r": 6.0})
+	var floor_y := float(outro["start"].y) + 20.0
+	for it in outro["items"]:
+		if it["landed"] or it["got"]:
+			continue
+		var iv: Vector2 = it["vel"]
+		if it["kind"] == "feather":
+			it["sway"] = float(it["sway"]) + dt * 3.0
+			iv = Vector2(sin(float(it["sway"])) * 60.0, 70.0)
+		else:
+			iv.y += 900.0 * dt
+		it["vel"] = iv
+		var np: Vector2 = Vector2(it["pos"]) + iv * dt
+		if np.y >= floor_y:
+			np.y = floor_y
+			it["landed"] = true
+			sfx("bounce", -6.0, 0.8 if it["kind"] == "egg" else 1.6)
+		it["pos"] = np
+	_apply_time_scale()
+
+
+func _outro_click(p: Vector2) -> void:
+	for it in outro["items"]:
+		if it["got"] or Vector2(it["pos"]).distance_to(p) > 34.0:
+			continue
+		it["got"] = true
+		if it["kind"] == "egg":
+			# награда всегда двойная: что-то попугаю, что-то игроку
+			var a: String = EGG_HERO[randi() % EGG_HERO.size()]
+			var b: String = EGG_PLAYER[randi() % EGG_PLAYER.size()]
+			outro["reward"] = [a, b]
+			var add := 3 if b == "+3 пера" else (5 if b == "+5 перьев" else 0)
+			save["feathers"] = int(save.get("feathers", 0)) + add
+			var rw: Array = save.get("rewards", [])
+			rw.append({"hero": a, "player": b})
+			save["rewards"] = rw
+			add_fx({"kind": "confetti", "pos": it["pos"], "dur": 1.4})
+			sfx("egg")
+			sfx("win", -4.0)
+		else:
+			save["feathers"] = int(save.get("feathers", 0)) + 1
+			add_fx({"kind": "sparkle", "pos": it["pos"], "dur": 0.5})
+			sfx("pickup", -4.0, 0.8)
+		Save.store(save)
+	var all := true
+	for it in outro["items"]:
+		if not it["got"]:
+			all = false
+	outro["done"] = all
+
+
+## Итоги забега: память попугая учится на том, что его било и чем он бил.
+func _save_run() -> void:
+	if sim and not learn:
+		return
+	save["runs"] = int(save.get("runs", 0)) + 1
+	var mem: Dictionary = save.get("memory", {"runs": 0, "taken": {}, "dealt": {}, "deaths": {}})
+	mem["runs"] = int(mem.get("runs", 0)) + 1
+	mem["taken"] = Save.blend(mem.get("taken", {}), Save.shares(dmg_by_src))
+	# эффективность умений: доля урона на уровень умения
+	var eff := {}
+	for k in dealt_by_src:
+		var lv := maxi(1, hero.lvl_of(k)) if k != "peck" else 1
+		eff[k] = float(dealt_by_src[k]) / float(lv)
+	mem["dealt"] = Save.blend(mem.get("dealt", {}), Save.shares(eff))
+	if over == "hero_dead":
+		var top := ""
+		var tv := 0.0
+		for k in dmg_by_src:
+			if float(dmg_by_src[k]) > tv:
+				tv = float(dmg_by_src[k])
+				top = k
+		var deaths: Dictionary = mem.get("deaths", {})
+		deaths[top] = int(deaths.get(top, 0)) + 1
+		mem["deaths"] = deaths
+	save["memory"] = mem
+	Save.store(save)

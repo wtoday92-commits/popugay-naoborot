@@ -326,8 +326,8 @@ func _draw_buttons(h: Hero, fr: int) -> void:
 	var y := 572.0
 	_button(Vector2(x + 20, y), "book", "Книга с полки", "Q", "тень 1,2 с, −15% здоровья", game.meteor_cd, game.METEOR_CD, true, edge)
 	var wave_ok: bool = game.time >= game.WAVE_UNLOCK
-	_button(Vector2(x + 20, y + 74), "basket", "Корзина белья", "W", "носки и тапки у стены" if wave_ok else "откроется в 1:00", game.wave_cd, game.WAVE_CD, wave_ok, edge)
-	_button(Vector2(x + 20, y + 148), "grab", "Бросок носка", "ЛКМ/ПКМ", "зажать на носке, метнуть", 0.0, 1.0, true, false)
+	_button(Vector2(x + 20, y + 74), "basket", "Корзина белья", "W", "носки и тапки у стены" if wave_ok else "откроется в 1:30", game.wave_cd, game.WAVE_CD, wave_ok, edge)
+	_button(Vector2(x + 20, y + 148), "grab", "Бросок носка", "ЛКМ/ПКМ", "зажать на носке, метнуть", game.throw_cd, game.THROW_CD, true, false)
 	_button(Vector2(x + 20, y + 222), "millet", "Подмена проса", "ЛКМ", "клик по колоску", game.millet_cd, game.MILLET_CD, true, edge)
 	var st := "резкий взмах в попугая"
 	var cd := 0.0

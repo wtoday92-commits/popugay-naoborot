@@ -82,7 +82,7 @@ var speed_t := 0.0
 var shield_hits := 0
 var eat_t := 0.0
 var dmg_log: Array = []
-var wariness := {"paw": 0.0, "meteor": 0.0, "millet": 0.0}
+var wariness := {"paw": 0.0, "meteor": 0.0, "millet": 0.0, "throw": 0.0}
 var closedness := 0.0
 var danger_here := 0.0
 var horde_center := Vector2.ZERO
@@ -120,7 +120,7 @@ func has_mod(k: String) -> bool:
 
 
 func max_hp() -> float:
-	return 100.0 + 20.0 * lvl_of("fluff")
+	return 120.0 + 20.0 * lvl_of("fluff")
 
 
 func speed() -> float:
@@ -208,7 +208,7 @@ func update(delta: float) -> void:
 	speed_t = maxf(0.0, speed_t - delta)
 	fruit_cd = maxf(0.0, fruit_cd - delta)
 	eat_t = maxf(0.0, eat_t - delta)
-	hp = minf(max_hp(), hp + 0.3 * delta)
+	hp = minf(max_hp(), hp + 0.9 * delta)
 	for k in wariness:
 		wariness[k] = maxf(0.0, float(wariness[k]) - 0.01 * delta)
 	waltz_t -= delta
@@ -301,7 +301,7 @@ func _attention() -> void:
 	for s in game.enemy_shots:
 		_cand(cands, s, 0.9, view, t)
 	for s in game.thrown:
-		_cand(cands, s, 1.0, view, t)
+		_cand(cands, s, 1.0 + 2.0 * float(wariness["throw"]), view, t)
 	for s in game.missiles:
 		_cand(cands, s, 1.1, view, t)
 	var ev: Dictionary = game.event
@@ -1190,6 +1190,22 @@ func dodge_paw(dir: Vector2) -> void:
 	say("Лапка! Увернулся.")
 
 
+## Летящий носок: увернуться можно, только если он в одном из слотов внимания.
+func try_dodge_throw(id: int, v: Vector2) -> bool:
+	if not focus_ids.has(id) or stun > 0.0 or held > 0.0 or trapped > 0.0:
+		return false
+	if randf() > 0.45 + float(wariness["throw"]):
+		return false
+	var dir := v.normalized()
+	var side := Vector2(-dir.y, dir.x)
+	if side.dot(pos - (pos - dir)) < 0.0 or randf() < 0.5:
+		side = -side
+	dodge_vel = side * 7.0 * M
+	dodge_t = 0.22
+	say("Носок летит! Увернулся.")
+	return true
+
+
 func grabbed(e: Enemy) -> void:
 	held = 1.0
 	opening = 0.0
@@ -1247,8 +1263,12 @@ func score_card(card: Dictionary) -> Dictionary:
 	s += best_r
 	if best_r > 1.5:
 		reason = best_txt
-	if card["new"] and card["kind"] == "skill":
-		s += 2.5 if level < 6 else 0.5
+	if card["kind"] == "skill":
+		# урон решает выживание: умения ценятся выше пассивок, особенно пока их мало
+		if card["new"]:
+			s += 4.0 if skills.size() < 2 else (2.5 if level < 8 else 0.5)
+		else:
+			s += 1.5
 	s += randf_range(-0.5, 0.5)
 	return {"score": s, "reason": reason}
 

@@ -15,8 +15,8 @@ const GLOW_NEED := 5
 const METEOR_CD := 12.0
 const METEOR_DELAY := 1.2
 const METEOR_R := 2.5 * M
-const WAVE_UNLOCK := 60.0
-const WAVE_CD := 30.0
+const WAVE_UNLOCK := 90.0
+const WAVE_CD := 40.0
 const RAM_UNLOCK := 20.0
 const RAM_SPEED := 1500.0
 const MILLET_CD := 30.0
@@ -26,6 +26,7 @@ const PAW_PUSH_MAX := 12
 const PAW_BRUISE := 4.0
 const PAW_BRUISED_SPEED := 380.0
 const GRAB_R := 28.0
+const THROW_CD := 4.0
 const MAX_ENEMIES := 170
 const MAX_GEMS := 400
 const CELL := 40.0
@@ -96,6 +97,7 @@ var double_spawn_until := -1.0
 var meteor_cd := 0.0
 var wave_cd := 0.0
 var millet_cd := 0.0
+var throw_cd := 0.0
 var paw := {"id": 0, "pos": Vector2(960, 700), "born": 0.0}
 var paw_vel := Vector2.ZERO
 var paw_bruise := 0.0
@@ -145,7 +147,13 @@ var _sim_report := 30.0
 var _sim_dodged := 0
 var dmg_by_src := {}
 var shot_at := -1.0
+var run_log: PackedStringArray = []
+var run_log_path := ""
+var _log_snap := 10.0
+var player_by_tool := {}
 var selftest := false
+var full_bot := false
+var _bot_throw := 0.0
 var _st_done := {}
 
 
@@ -155,6 +163,7 @@ func _ready() -> void:
 	sim = args.has("--sim")
 	sim_bot = not args.has("--nobot")
 	selftest = args.has("--selftest")
+	full_bot = args.has("--fullbot")
 	for a in args:
 		if a.begins_with("--shot="):
 			shot_at = float(a.substr(7))
@@ -186,6 +195,11 @@ func sfx(name: String, vol: float = 0.0, pitch: float = 1.0) -> void:
 
 
 func start_run() -> void:
+	if hero != null and over == "" and time > 5.0:
+		_write_log("прерван")
+	run_log = PackedStringArray()
+	_log_snap = 10.0
+	player_by_tool = {}
 	time = 0.0
 	for arr in [enemies, gems, chests, meteors, shots, enemy_shots, thrown, missiles, delayed, fx, texts, thoughts, banners, pending, combo_log, paw_trail]:
 		arr.clear()
@@ -199,6 +213,7 @@ func start_run() -> void:
 	meteor_cd = 2.0
 	wave_cd = 0.0
 	millet_cd = 0.0
+	throw_cd = 0.0
 	paw_bruise = 0.0
 	held_e = null
 	menu = {}
@@ -281,6 +296,7 @@ func _step(delta: float) -> void:
 	meteor_cd = maxf(0.0, meteor_cd - delta)
 	wave_cd = maxf(0.0, wave_cd - delta)
 	millet_cd = maxf(0.0, millet_cd - delta)
+	throw_cd = maxf(0.0, throw_cd - delta)
 	combo_cd = maxf(0.0, combo_cd - delta)
 	_director(delta)
 	_update_events(delta)
@@ -301,8 +317,12 @@ func _step(delta: float) -> void:
 	if hero.xp >= hero.xp_next and levelup.is_empty() and over == "":
 		begin_levelup()
 	_timed_hints()
+	if time >= _log_snap:
+		_log_snap += 10.0
+		log_event("СНИМОК", "здоровье %d/%d · ур. %d · врагов %d · стресс %.2f · режим %s · умения %s · пассивки %s · моды %s" % [int(hero.hp), int(hero.max_hp()), hero.level, enemies.size(), hero.stress, Hero.MODE_NAMES[hero.mode], str(hero.skills), str(hero.general), str(hero.mods.values())])
 	if time >= RUN_LENGTH and over == "":
 		over = "survived"
+		_write_log("герой выжил")
 		add_thought("Пять минут! Я выжил.")
 		sfx("fail")
 
@@ -446,6 +466,7 @@ func _check_ram(a: Vector2, b: Vector2, v: Vector2) -> void:
 		sfx("whoosh", -10.0, 1.6)
 		return
 	hero.rammed(dir)
+	log_event("ИГРОК", "таран лапкой")
 	paw_bruise = PAW_BRUISE
 	rams += 1
 	shake = 5.0
@@ -496,6 +517,8 @@ func _paw_push(delta: float) -> void:
 
 
 func _try_grab(p: Vector2) -> void:
+	if throw_cd > 0.0:
+		return
 	if held_e != null or paw_bruise > 0.0 or over != "" or paused or not FIELD.has_point(p):
 		return
 	var best: Enemy = null
@@ -523,7 +546,9 @@ func _release_grab() -> void:
 		e.pos = resolve_circle(e.pos, e.radius)
 		enemies.append(e)
 		return
-	thrown.append({"id": new_id(), "pos": e.pos, "vel": v, "e": e, "born": time, "spin": 0.0})
+	throw_cd = THROW_CD
+	thrown.append({"id": new_id(), "pos": e.pos, "vel": v, "e": e, "born": time, "spin": 0.0, "dodged": false})
+	log_event("ИГРОК", "бросок: %s" % EDEFS[e.type]["name"])
 	sfx("throw", -4.0, randf_range(0.9, 1.2))
 
 
@@ -540,9 +565,13 @@ func _update_thrown(delta: float) -> void:
 			p = resolve_circle(p, e.radius)
 			v = -v * 0.3
 			sfx("bounce", -10.0, 1.4)
+		elif not s["dodged"] and p.distance_to(hero.pos) < hero.radius + e.radius + 40.0 and hero.try_dodge_throw(int(s["id"]), v):
+			# заметил летящий носок — отпрыгнул
+			s["dodged"] = true
 		elif p.distance_to(hero.pos) < hero.radius + e.radius + 4.0:
 			# попадание носком: немного урона и толчок
-			var dmg := 6.0 + float(horde_level)
+			hero.wariness["throw"] = minf(0.6, float(hero.wariness["throw"]) + 0.15)
+			var dmg := 4.0 + 0.5 * float(horde_level)
 			hero.take_damage(dmg, "throw", "Брошенный %s" % String(EDEFS[e.type]["name"]).to_lower(), true)
 			hero.knocked(v.normalized(), 180.0, 0.15)
 			throws_hit += 1
@@ -595,6 +624,7 @@ func _menu_click(p: Vector2) -> void:
 				show_hint("Кликните, куда полетит снаряд.", 3.0)
 			else:
 				g["mod"] = kind
+				log_event("ИГРОК", "подмена проса: %s" % MENU_NAMES[kind])
 				millet_cd = MILLET_CD
 				add_fx({"kind": "sparkle", "pos": g["pos"], "dur": 0.5})
 			return
@@ -611,6 +641,7 @@ func _launch_missile(p: Vector2) -> void:
 	if dir == Vector2.ZERO:
 		dir = Vector2.RIGHT
 	missiles.append({"id": new_id(), "pos": g["pos"], "vel": dir * 7.0 * M, "bounces": 5, "born": time, "life": 14.0})
+	log_event("ИГРОК", "просо-снаряд")
 	millet_cd = MILLET_CD
 	sfx("throw", 0.0, 0.8)
 
@@ -657,6 +688,7 @@ func cast_meteor() -> void:
 		return
 	meteor_cd = METEOR_CD
 	meteors_cast += 1
+	log_event("ИГРОК", "книга (до героя %d м)" % int(p.distance_to(hero.pos) / M))
 	p = p.clamp(floor_rect.position, floor_rect.end)
 	meteors.append({"id": new_id(), "pos": p, "born": time, "t": 0.0, "delay": METEOR_DELAY, "r": METEOR_R,
 		"landed": false, "land_t": 0.0, "focus_t": -1.0, "notice_t": -1.0})
@@ -667,6 +699,7 @@ func cast_wave() -> void:
 	if over != "" or paused or time < WAVE_UNLOCK or wave_cd > 0.0:
 		return
 	wave_cd = WAVE_CD
+	log_event("ИГРОК", "корзина белья")
 	var p: Vector2 = paw["pos"]
 	var f := floor_rect
 	var dl := p.x - f.position.x
@@ -688,7 +721,7 @@ func cast_wave() -> void:
 	else:
 		base = Vector2(clampf(p.x, f.position.x + 170, f.end.x - 170), f.end.y - 24)
 		along = Vector2(1, 0)
-	for i in 14:
+	for i in 10:
 		var q := resolve_circle(base + along * randf_range(-160.0, 160.0), 12.0)
 		if is_blocked(q):
 			q = edge_point(0.0)
@@ -751,6 +784,7 @@ func _director(delta: float) -> void:
 	if boss == null and time >= BOSS_AT:
 		boss = spawn_enemy(Enemy.T.BOSS, Vector2(floor_rect.get_center().x, floor_rect.position.y + 200))
 		boss.ability_cd = 2.5
+		log_event("БОСС", "пылесос проснулся")
 		banner("Робот-пылесос проснулся!", Color("b23a2e"), 40, 3.0)
 		sfx("boss")
 		shake = 10.0
@@ -1158,6 +1192,7 @@ func _kill(e: Enemy) -> void:
 				_drop_gem(e.pos + Vector2(randf_range(-30, 30), randf_range(-30, 30)), i < 2)
 		Enemy.T.BOSS:
 			boss_defeated = true
+			log_event("БОСС", "пылесос сломан")
 			banner("Пылесос сломан!", Color("4f8f3a"), 42, 3.0)
 			add_thought("Я сломал пылесос! Я легенда!")
 			hero.add_fruit(Skills.FRUITS[randi() % Skills.FRUITS.size()])
@@ -1425,6 +1460,7 @@ func _update_events(delta: float) -> void:
 
 
 func _start_event(type: String) -> void:
+	log_event("ИВЕНТ", "начался: %s" % Skills.EVENT_NAMES[type])
 	event = {"type": type, "id": new_id(), "born": time, "left": 30.0}
 	match type:
 		"circle":
@@ -1618,6 +1654,9 @@ func _update_levelup(real_dt: float) -> void:
 # ---------- урон по герою и награды игроку ----------
 
 func on_hero_damaged(a: float, src: String, label: String, from_player: bool) -> void:
+	log_event("УРОН", "%s −%.0f → %d/%d" % [label, a, int(hero.hp), int(hero.max_hp())])
+	if from_player or src == "meteor" or src == "paw":
+		player_by_tool[label] = int(player_by_tool.get(label, 0)) + int(round(a))
 	dmg_by_src[src] = int(dmg_by_src.get(src, 0)) + int(a)
 	var mine := from_player or src == "meteor" or src == "paw"
 	if mine:
@@ -1654,6 +1693,7 @@ func hero_died() -> void:
 	if over != "":
 		return
 	over = "hero_dead"
+	_write_log("герой повержен")
 	hero.say("...Попался.")
 	banner("ПОПАЛСЯ!", Color("b23a2e"), 56, 99.0)
 	sfx("win")
@@ -1729,6 +1769,7 @@ func add_text(p: Vector2, s: String, col: Color, size: int) -> void:
 func add_thought(s: String) -> void:
 	if thoughts.size() > 0 and thoughts[0]["text"] == s:
 		return
+	log_event("МЫСЛЬ", s)
 	thoughts.push_front({"text": s, "time": time})
 	if thoughts.size() > 12:
 		thoughts.pop_back()
@@ -1757,6 +1798,8 @@ func _sim_step() -> void:
 	if sim_bot and over == "" and meteor_cd <= 0.0 and time > 5.0:
 		paw["pos"] = hero.pos + hero.vel * 0.8 + Vector2(randf_range(-30, 30), randf_range(-30, 30))
 		cast_meteor()
+	if full_bot and over == "":
+		_full_bot()
 	if time >= _sim_report:
 		_sim_report += 30.0
 		print("[%3d c] HP %3d/%3d  ур.%2d  орда %d  врагов %3d  режим %s  стресс %.2f  умения %s  моды %s  фрукты %s  ивенты %d  кормушки %d  книги %d/%d" % [
@@ -1821,3 +1864,56 @@ func _selftest_step() -> void:
 	if over != "" or time > 90.0:
 		print("ТЕСТ итог: бросков в цель %d, подмен сработало %d, урон игрока %d, урон по герою %s" % [throws_hit, tricks, int(player_damage), str(dmg_by_src)])
 		get_tree().quit()
+
+
+# ---------- журнал забега ----------
+
+func log_event(kind: String, text: String) -> void:
+	if sim:
+		return
+	run_log.append("%6.1f  %-7s %s" % [time, kind, text])
+
+
+## Пишет журнал в user://runs/ (на Windows: %APPDATA%/Godot/app_userdata/Попугай наоборот/runs).
+func _write_log(result: String) -> void:
+	if sim or run_log.is_empty():
+		return
+	DirAccess.make_dir_recursive_absolute("user://runs")
+	var stamp := Time.get_datetime_string_from_system(false, true).replace(":", "-").replace(" ", "_")
+	run_log_path = "user://runs/run_%s.txt" % stamp
+	var f := FileAccess.open(run_log_path, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_line("Забег: %s на %s" % [result, Hud.mmss(time)])
+	f.store_line("Герой: уровень %d, здоровье %d/%d, умения %s, пассивки %s, моды %s" % [hero.level, int(hero.hp), int(hero.max_hp()), str(hero.skills), str(hero.general), str(hero.mods.values())])
+	f.store_line("Урон по герою по источникам: %s" % str(dmg_by_src))
+	f.store_line("Урон от игрока по инструментам: %s" % str(player_by_tool))
+	f.store_line("Книги: %d из %d · тараны: %d · броски в цель: %d · подмены: %d · ивенты пройдено %d, сорвано %d · пылесос %s" % [meteor_hits, meteors_cast, rams, throws_hit, tricks, hero.events_done, events_denied, "сломан" if boss_defeated else ("жив" if boss != null else "не появился")])
+	f.store_line("")
+	for line in run_log:
+		f.store_line(line)
+	f.close()
+
+
+## «Сильный игрок» для прогонов: бросает носки, подменяет просо, опрокидывает корзину.
+func _full_bot() -> void:
+	_build_grid()
+	if time >= _bot_throw:
+		_bot_throw = time + randf_range(2.0, 3.5)
+		for e in enemies_near(hero.pos, 7.0 * M, 20):
+			if e.grabbable() and e.pos.distance_to(hero.pos) > 3.0 * M:
+				_try_grab(e.pos)
+				if held_e != null:
+					var aim := hero.pos + hero.vel * 0.3 + Vector2(randf_range(-40, 40), randf_range(-40, 40))
+					paw_vel = (aim - held_e.pos).normalized() * 1200.0
+					_release_grab()
+				break
+	if millet_cd <= 0.0 and time > 10.0:
+		for g in gems:
+			if g["big"] and not g["glow"] and not g.has("mod") and Vector2(g["pos"]).distance_to(hero.pos) < 6.0 * M:
+				g["mod"] = ["trap", "rotten", "egg"][randi() % 3]
+				millet_cd = MILLET_CD
+				break
+	if wave_cd <= 0.0 and time >= WAVE_UNLOCK:
+		paw["pos"] = hero.pos
+		cast_wave()

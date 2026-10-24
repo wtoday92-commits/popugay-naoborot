@@ -55,7 +55,7 @@ func top_speed() -> float:
 
 ## Кого лапка может схватить и бросить.
 func grabbable() -> bool:
-	return type == T.SOCK or type == T.YARN or type == T.DUST
+	return type == T.SOCK or type == T.YARN or type == T.DUST or type == T.SLIPPER
 
 
 func is_big() -> bool:

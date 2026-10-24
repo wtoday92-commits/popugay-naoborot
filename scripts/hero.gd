@@ -349,7 +349,10 @@ func _attention() -> void:
 	for s in game.enemy_shots:
 		_cand(cands, s, 0.9, view, t)
 	for s in game.thrown:
-		_cand(cands, s, 1.0 + 2.0 * float(wariness["throw"]) + learned_alert("throw"), view, t)
+		# горящий носок заметнее
+		_cand(cands, s, 1.0 + 1.5 * float(s["fire"]) + 2.0 * float(wariness["throw"]) + learned_alert("throw"), view, t)
+	for f in game.fruit_drops:
+		_cand(cands, f, 1.0, view, t)
 	for s in game.missiles:
 		_cand(cands, s, 1.1, view, t)
 	var ev: Dictionary = game.event
@@ -568,6 +571,9 @@ func _best_poi() -> Dictionary:
 				# характер: жадный герой соглашается при здоровье выше 50%
 				if hp_frac() > 0.5 and greed > 0.35:
 					best = _consider(best, ev, "altar", _utility(ev["pos"], 26.0, 1.0, 1.0, e_exp))
+	for f in game.fruit_drops:
+		# выбитый фрукт хочется вернуть
+		best = _consider(best, f, "fruit", _utility(f["pos"], 14.0, 1.0, 1.0, e_exp))
 	var prog := float(xp) / float(xp_next)
 	var trust := 1.0 - float(wariness["millet"])
 	var checked := 0
@@ -689,6 +695,8 @@ func _say_target(poi: Dictionary) -> void:
 			say("Шкатулка удирает! Догоняю.")
 		"altar":
 			say("Лакомство... Рискну, здоровья хватает.")
+		"fruit":
+			say("Верну свой фрукт!")
 
 
 ## Фрукты: герой съедает их сам, когда ситуация подходит.
@@ -1186,6 +1194,11 @@ func _pickups(delta: float) -> void:
 		if d < radius + 8.0:
 			g["taken"] = true
 			game.on_gem_taken(g)
+	for f in game.fruit_drops:
+		if pos.distance_to(f["pos"]) < radius + 14.0 and float(f["t"]) > 0.5:
+			f["taken"] = true
+			add_fruit(f["fruit"])
+			game.sfx("fruit", -6.0)
 	if opening <= 0.0 and opening_chest == null:
 		for c in game.chests:
 			if pos.distance_to(c["pos"]) < radius + 18.0:

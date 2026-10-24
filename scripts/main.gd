@@ -103,6 +103,9 @@ var wave_cd := 0.0
 var millet_cd := 0.0
 var throw_cd := 0.0
 var hold_t := 0.0
+var sling_anchor := Vector2.ZERO
+var fruit_drops: Array = []
+var furniture_bounce := 0.0
 var millet_unlocked := false
 var phase := "play"
 var intro_t := 0.0
@@ -114,6 +117,7 @@ var dealt_by_src := {}
 var unlock_seen := {}
 var learn := false
 var die_at := -1.0
+var shot_block := false
 var win_at := -1.0
 var paw := {"id": 0, "pos": Vector2(960, 700), "born": 0.0}
 var paw_vel := Vector2.ZERO
@@ -185,6 +189,8 @@ func _ready() -> void:
 	for a in args:
 		if a.begins_with("--shot="):
 			shot_at = float(a.substr(7))
+		if a == "--shotblock":
+			shot_block = true
 		if a.begins_with("--die="):
 			die_at = float(a.substr(6))
 		if a.begins_with("--win="):
@@ -228,7 +234,7 @@ func start_run() -> void:
 	_log_snap = 10.0
 	player_by_tool = {}
 	time = 0.0
-	for arr in [enemies, gems, chests, meteors, shots, enemy_shots, thrown, missiles, delayed, fx, texts, thoughts, banners, pending, combo_log, paw_trail]:
+	for arr in [enemies, gems, chests, meteors, shots, enemy_shots, thrown, missiles, delayed, fx, texts, thoughts, banners, pending, combo_log, paw_trail, fruit_drops]:
 		arr.clear()
 	_grid.clear()
 	horde_level = 1
@@ -370,7 +376,6 @@ func _step(delta: float) -> void:
 	_director(delta)
 	_update_events(delta)
 	_update_paw_threat()
-	_paw_push(delta)
 	hero.update(delta)
 	_update_enemies(delta)
 	_update_shots(delta)
@@ -380,6 +385,7 @@ func _step(delta: float) -> void:
 	_update_delayed()
 	_update_pickups(delta)
 	_update_fx(delta)
+	furniture_bounce = maxf(0.0, furniture_bounce - delta)
 	enemies = enemies.filter(func(e): return not e.dead)
 	if not menu.is_empty() and bool(menu["gem"]["taken"]):
 		menu = {}
@@ -399,7 +405,7 @@ func _step(delta: float) -> void:
 
 func _timed_hints() -> void:
 	var list := [
-		[0.5, "throw", "Зажмите ЛКМ на носке: он тяжёлый. Потяните мышь в сторону попугая и отпустите."],
+		[0.5, "throw", "Рогатка: зажмите ЛКМ на носке, оттяните лапку назад и отпустите. Издалека носок разгорается и бьёт больнее."],
 		[RAM_UNLOCK, "ram", "Таран! Резко махните лапкой в попугая: он оглохнет на полсекунды."],
 		[BOOK_UNLOCK, "book", "Q — уронить книгу с полки туда, где лапка. Тень видна 1,2 с."],
 		[WAVE_UNLOCK, "wave", "W — опрокинуть корзину белья у стены, к которой ближе лапка."],
@@ -511,8 +517,7 @@ func _update_paw(dt: float) -> void:
 		# ушибленная лапка отстаёт от мыши
 		p = old.move_toward(m, PAW_BRUISED_SPEED * dt)
 	if held_e != null:
-		# носок тяжёлый: лапка ползёт медленно, а на бросок есть пара секунд
-		p = old.move_toward(m, HELD_SPEED * dt)
+		# рогатка: предмет держится на месте, лапка тянет резинку; на выстрел пара секунд
 		if not paused and over == "":
 			hold_t -= dt
 			if hold_t <= 0.0:
@@ -530,7 +535,8 @@ func _update_paw(dt: float) -> void:
 		tr["t"] = float(tr["t"]) - dt
 	paw_trail = paw_trail.filter(func(tr): return float(tr["t"]) > 0.0)
 	if held_e != null:
-		held_e.pos = p + Vector2(0, 18) + Vector2(sin(Time.get_ticks_msec() * 0.02) * 3.0, 0)
+		var pull: Vector2 = (p - sling_anchor).limit_length(SLING_MAX)
+		held_e.pos = sling_anchor + pull * 0.15 + Vector2(sin(Time.get_ticks_msec() * 0.03) * 1.5, 0)
 	if not paused and over == "" and hero != null and held_e == null:
 		_check_ram(old, p, v)
 
@@ -621,6 +627,7 @@ func _try_grab(p: Vector2) -> void:
 		return
 	held_e = best
 	hold_t = HOLD_TIME
+	sling_anchor = best.pos
 	enemies.erase(best)
 	best.push_vel = Vector2.ZERO
 	sfx("grab", -4.0, randf_range(0.9, 1.1))
@@ -638,26 +645,31 @@ func _drop_held() -> void:
 	sfx("bounce", -10.0, 0.7)
 
 
-## Бросок как из рогатки: носок летит туда, куда тянет мышь от лапки.
+## Рогатка: зажали предмет, оттянули лапку — он летит в обратную сторону, тем быстрее, чем сильнее натянуто.
 func throw_vector() -> Vector2:
-	var m := get_global_mouse_position()
-	var pull: Vector2 = m - Vector2(paw["pos"])
-	if pull.length() < 6.0:
+	if held_e == null:
 		return Vector2.ZERO
-	return pull.normalized() * clampf(pull.length() * 7.0, 320.0, 1300.0)
-
+	var pull: Vector2 = (Vector2(paw["pos"]) - sling_anchor).limit_length(SLING_MAX)
+	if pull.length() < 18.0:
+		return Vector2.ZERO
+	var spd := SOCK_SPEED * pull.length() / SLING_MAX
+	if held_e.type == Enemy.T.SLIPPER:
+		spd *= 0.55
+	return -pull.normalized() * spd
 
 func _release_grab(v_override: Vector2 = Vector2.ZERO) -> void:
 	if held_e == null:
 		return
 	var v := v_override if v_override != Vector2.ZERO else throw_vector()
-	if v.length() < 260.0:
+	if v_override != Vector2.ZERO and held_e.type == Enemy.T.SLIPPER:
+		v *= 0.55
+	if v.length() < 240.0:
 		_drop_held()
 		return
 	var e := held_e
 	held_e = null
 	throw_cd = THROW_CD
-	thrown.append({"id": new_id(), "pos": e.pos, "vel": v, "e": e, "born": time, "spin": 0.0, "dodged": false})
+	thrown.append({"id": new_id(), "pos": e.pos, "vel": v, "e": e, "born": time, "spin": 0.0, "dodged": false, "dist": 0.0, "fire": 0.0})
 	log_event("ИГРОК", "бросок: %s" % EDEFS[e.type]["name"])
 	sfx("throw", -4.0, randf_range(0.9, 1.2))
 
@@ -665,10 +677,15 @@ func _release_grab(v_override: Vector2 = Vector2.ZERO) -> void:
 func _update_thrown(delta: float) -> void:
 	for s in thrown:
 		var e: Enemy = s["e"]
+		var slipper: bool = e.type == Enemy.T.SLIPPER
 		var v: Vector2 = s["vel"]
 		var p: Vector2 = s["pos"] + v * delta
-		s["spin"] = float(s["spin"]) + delta * 18.0
-		v *= exp(-1.3 * delta)
+		s["dist"] = float(s["dist"]) + v.length() * delta
+		# носок разгорается в полёте: чем дальше летит, тем «огненнее» и больнее
+		if not slipper:
+			s["fire"] = clampf(float(s["dist"]) / (9.0 * M), 0.0, 1.0)
+		s["spin"] = float(s["spin"]) + delta * (10.0 if slipper else 18.0)
+		v *= exp(-(0.9 if slipper else 0.45) * delta)
 		var land := false
 		if is_blocked(p):
 			land = true
@@ -676,20 +693,28 @@ func _update_thrown(delta: float) -> void:
 			v = -v * 0.3
 			sfx("bounce", -10.0, 1.4)
 		elif not s["dodged"] and p.distance_to(hero.pos) < hero.radius + e.radius + 40.0 and hero.try_dodge_throw(int(s["id"]), v):
-			# заметил летящий носок — отпрыгнул
+			# заметил летящий предмет — отпрыгнул
 			s["dodged"] = true
 		elif p.distance_to(hero.pos) < hero.radius + e.radius + 4.0:
-			# попадание носком: немного урона и толчок
 			hero.wariness["throw"] = minf(0.6, float(hero.wariness["throw"]) + 0.15)
-			var dmg := 4.0 + 0.5 * float(horde_level)
-			hero.take_damage(dmg, "throw", "Брошенный %s" % String(EDEFS[e.type]["name"]).to_lower(), true)
-			hero.knocked(v.normalized(), 180.0, 0.15)
+			var dist_m: float = float(s["dist"]) / M
+			var label := "Брошенный тапок" if slipper else ("Огненный носок" if float(s["fire"]) > 0.6 else "Брошенный носок")
+			if slipper:
+				hero.take_damage(7.0, "throw", label, true)
+				# тапок выбивает фрукты: издалека — два
+				_knock_fruits(2 if dist_m > 9.0 else 1, v.normalized())
+				hero.knocked(v.normalized(), 260.0, 0.3)
+			else:
+				hero.take_damage(2.0 + 1.1 * dist_m, "throw", label, true)
+				hero.knocked(v.normalized(), 180.0, 0.15)
+				if float(s["fire"]) > 0.6:
+					add_fx({"kind": "fire", "pos": hero.pos, "r": 50.0, "dur": 0.4})
 			throws_hit += 1
 			land = true
-			shake = 3.0
+			shake = 3.0 + 4.0 * float(s["fire"])
 			sfx("hit", 0.0, 1.3)
 			sfx("squawk", -4.0, 1.1)
-		elif v.length() < 140.0:
+		elif v.length() < 160.0:
 			land = true
 		s["pos"] = p
 		s["vel"] = v
@@ -700,6 +725,21 @@ func _update_thrown(delta: float) -> void:
 			enemies.append(e)
 			s["done"] = true
 	thrown = thrown.filter(func(s): return not s.has("done"))
+
+
+## Тапок выбивает из попугая случайные фрукты: они отлетают на пол, и он может их подобрать.
+func _knock_fruits(n: int, dir: Vector2) -> void:
+	for i in n:
+		if hero.fruits.is_empty():
+			break
+		var f: String = hero.fruits[randi() % hero.fruits.size()]
+		hero.fruits.erase(f)
+		var to := resolve_circle(hero.pos + dir.rotated(randf_range(-0.8, 0.8)) * randf_range(2.5, 4.5) * M, 12.0)
+		fruit_drops.append({"id": new_id(), "pos": hero.pos, "to": to, "fruit": f, "born": time, "life": 12.0, "taken": false, "t": 0.0})
+		add_text(hero.pos + Vector2(0, -60 - i * 20), "выбит фрукт!", Color("6a4fb3"), 20)
+		hero.say("Мой %s!" % String(Skills.FRUIT_NAMES[f]).to_lower())
+		log_event("ИГРОК", "тапок выбил фрукт: %s" % Skills.FRUIT_NAMES[f])
+
 
 
 # ---------- меню над колоском ----------
@@ -1081,10 +1121,7 @@ func _update_enemies(delta: float) -> void:
 					e.grab_t = 0.5
 			Enemy.T.BOX:
 				e.phase += delta * 10.0
-				var away := -dir
-				var c := floor_rect.get_center() - e.pos
-				dir = (away + c.normalized() * clampf(1.0 - _wall_dist(e.pos) / (3.0 * M), 0.0, 1.0) * 1.6).normalized()
-				dir = dir.rotated(sin(time * 2.0) * 0.5)
+				dir = _flee_dir(e, -dir)
 				e.shoot_cd -= delta
 				if e.shoot_cd <= 0.0:
 					e.shoot_cd = 0.6
@@ -1095,6 +1132,8 @@ func _update_enemies(delta: float) -> void:
 					dir = e.dash_dir
 		if e.fear > 0.0:
 			dir = -dir
+		if e.type != Enemy.T.BOSS and e.type != Enemy.T.BOX and spd > 0.0:
+			dir = _avoid(e, dir)
 		if e.stun > 0.0 or e.tumble > 0.0:
 			spd = 0.0
 		if e.slow > 0.0:
@@ -1105,7 +1144,10 @@ func _update_enemies(delta: float) -> void:
 		e.push_vel *= exp(-3.0 * delta)
 		if e.type != Enemy.T.BOSS:
 			_separate(e)
-		e.pos = resolve_circle(e.pos, e.radius)
+			e.pos = resolve_circle(e.pos, e.radius)
+		else:
+			# пылесос проезжает под мебелью и упирается только в стены
+			e.pos = e.pos.clamp(floor_rect.position + Vector2(e.radius, e.radius), floor_rect.end - Vector2(e.radius, e.radius))
 		var md := e.radius + hero.radius
 		if d < md:
 			if e.type != Enemy.T.HAND and e.type != Enemy.T.BOX and e.atk_cd <= 0.0 and not e.is_airborne() and e.tumble <= 0.0 and e.stun <= 0.0:
@@ -1113,6 +1155,50 @@ func _update_enemies(delta: float) -> void:
 				hero.take_damage(e.dmg, ENAMES[e.type], src_label(e), e.from_player)
 			if d > 0.5 and e.type != Enemy.T.BOSS:
 				e.pos = hp_pos - dir * md
+
+
+## Обход препятствий: если впереди мебель или стена, юнит забирает вбок (каждый в свою сторону).
+func _avoid(e: Enemy, dir: Vector2) -> Vector2:
+	var look := e.radius + 16.0
+	if not _blocked_r(e.pos + dir * look, e.radius * 0.7):
+		return dir
+	var side := 1.0 if e.id % 2 == 0 else -1.0
+	for a in [0.5, 0.9, 1.3, 1.7, 2.2]:
+		for s in [side, -side]:
+			var d2 := dir.rotated(a * s)
+			if not _blocked_r(e.pos + d2 * look, e.radius * 0.7):
+				return d2
+	return dir
+
+
+func _blocked_r(p: Vector2, r: float) -> bool:
+	if not floor_rect.grow(-r).has_point(p):
+		return true
+	for o in obstacles:
+		if o.grow(r).has_point(p):
+			return true
+	return false
+
+
+## Шкатулка убегает: из 16 направлений выбирает то, что дальше от попугая и не упирается в стену.
+func _flee_dir(e: Enemy, away: Vector2) -> Vector2:
+	var best := away
+	var bs := -INF
+	for i in 16:
+		var d := Vector2.RIGHT.rotated(TAU * i / 16.0)
+		var s := d.dot(away)
+		var free := 0
+		for k in [1.0, 2.0, 3.5]:
+			if _blocked_r(e.pos + d * k * M, e.radius):
+				break
+			free += 1
+		if free == 0:
+			continue
+		s += 0.6 * free + 0.3 * d.dot(e.move_dir)
+		if s > bs:
+			bs = s
+			best = d
+	return best
 
 
 func _wall_dist(p: Vector2) -> float:
@@ -1196,11 +1282,8 @@ func _update_boss(e: Enemy, delta: float, d: float, dir: Vector2) -> float:
 			return 0.0
 		3:
 			e.state_t -= delta
-			var nxt := e.pos + e.dash_dir * 9.0 * M * delta
+			var nxt := e.pos + e.dash_dir * 14.0 * M * delta
 			var hit_wall := not floor_rect.grow(-e.radius - 2.0).has_point(nxt)
-			for o in obstacles:
-				if o.grow(e.radius - 6.0).has_point(nxt):
-					hit_wall = true
 			if e.pos.distance_to(hero.pos) < e.radius + hero.radius + 6.0 and hero.stun <= 0.0:
 				hero.take_damage(20.0 + 2.0 * horde_level, "boss", "Пылесос", false)
 				hero.knocked(e.dash_dir.rotated(PI * 0.5 * signf(randf() - 0.5)), 420.0, 0.35)
@@ -1210,12 +1293,9 @@ func _update_boss(e: Enemy, delta: float, d: float, dir: Vector2) -> float:
 				e.state = 0
 				e.ability_cd = 2.2
 				if hit_wall:
-					e.stun = 1.0
-					shake = 8.0
-					sfx("thud", 0.0, 0.7)
-					add_fx({"kind": "dust", "pos": e.pos + e.dash_dir * e.radius, "r": 50.0, "dur": 0.5})
+					_boss_slam(e)
 				return 0.0
-			return 9.0 * M
+			return 14.0 * M
 		4:
 			e.state_t -= delta
 			if e.state_t <= 0.0:
@@ -1228,6 +1308,33 @@ func _update_boss(e: Enemy, delta: float, d: float, dir: Vector2) -> float:
 				e.ability_cd = 3.0
 			return 0.0
 	return e.speed
+
+
+## Пылесос врезается в стену так, что всё в комнате подпрыгивает и разлетается от удара.
+func _boss_slam(e: Enemy) -> void:
+	e.stun = 1.2
+	shake = 16.0
+	furniture_bounce = 0.7
+	sfx("thud", 4.0, 0.6)
+	sfx("gong", -6.0, 0.6)
+	var c := e.pos + e.dash_dir * e.radius
+	add_fx({"kind": "dust", "pos": c, "r": 90.0, "dur": 0.7})
+	add_fx({"kind": "ring", "pos": c, "r": 9.0 * M, "dur": 0.6, "color": Color(0.5, 0.45, 0.4, 0.8)})
+	for o in enemies:
+		if o == e or o.dead:
+			continue
+		var d := o.pos.distance_to(c)
+		if d < 10.0 * M:
+			o.push_vel += (o.pos - c).normalized() * (900.0 * (1.0 - d / (10.0 * M)) + 200.0)
+			o.tumble = 0.6
+	for g in gems:
+		var gp: Vector2 = g["pos"]
+		var d := gp.distance_to(c)
+		if d < 10.0 * M:
+			g["pos"] = resolve_circle(gp + (gp - c).normalized() * randf_range(40.0, 140.0) * (1.0 - d / (10.0 * M) + 0.3), 6.0)
+	if hero.pos.distance_to(c) < 5.0 * M:
+		hero.knocked((hero.pos - c).normalized(), 380.0, 0.25)
+	add_thought("Ух, как бахнуло!")
 
 
 func _separate(e: Enemy) -> void:
@@ -1466,6 +1573,15 @@ func on_gem_taken(g: Dictionary) -> void:
 
 
 func _update_pickups(delta: float) -> void:
+	for f in fruit_drops:
+		f["t"] = float(f["t"]) + delta
+		f["life"] = float(f["life"]) - delta
+		var k := clampf(float(f["t"]) / 0.5, 0.0, 1.0)
+		if k < 1.0:
+			f["pos"] = Vector2(f["pos"]).lerp(f["to"], k)
+		if float(f["life"]) <= 0.0:
+			f["taken"] = true
+	fruit_drops = fruit_drops.filter(func(f): return not f["taken"])
 	gems = gems.filter(func(g): return not g["taken"])
 	while gems.size() > MAX_GEMS:
 		gems.pop_front()
@@ -1698,10 +1814,11 @@ func on_fruit_eaten(f: String) -> void:
 
 # ---------- левелап героя: замедление и видимый выбор ----------
 
-const LU_BLOCK := 1.5
-const LU_PICK := 2.4
-const LU_SLOW := 3.2
-const LU_END := 4.8
+const LU_PICK := 1.2
+const LU_SLOW := 1.8
+const LU_END := 2.4
+const SLING_MAX := 170.0
+const SOCK_SPEED := 1700.0
 
 
 func _make_cards() -> Array:
@@ -1743,18 +1860,20 @@ func begin_levelup() -> void:
 		scored.append(r)
 		if float(r["score"]) > float(scored[best]["score"]):
 			best = i
-	var tut_block: bool = not sim and not bool(save.get("tut_block", false)) and cards.size() > 1
-	levelup = {"cards": cards, "scores": scored, "chosen": best, "t": 0.0, "applied": false, "level": hero.level, "blocked": -1, "tut": tut_block}
+	var first: bool = not bool(save.get("tut_block", false))
+	levelup = {"cards": cards, "scores": scored, "chosen": best, "t": 0.0, "applied": false, "level": hero.level,
+		"blocked": -1, "tut": first, "need_block": cards.size() > 1 and not sim, "wait": 0.0}
+	if sim and full_bot and cards.size() > 1:
+		_block_card(best)
 	hero.choosing = true
 	sfx("level", -4.0)
 
 
 func _apply_time_scale() -> void:
 	var k := 1.0
-	if not levelup.is_empty() and float(levelup["t"]) < LU_SLOW:
-		k = 0.3
-		if bool(levelup["tut"]) and int(levelup["blocked"]) < 0:
-			k = 0.03
+	if not levelup.is_empty() and (levelup_block_open() or float(levelup["t"]) < LU_SLOW):
+		# игра застывает, пока игрок запрещает умение и попугай выбирает
+		k = 0.001
 	if not tut.is_empty():
 		k = 0.04
 	if over != "" or phase == "intro":
@@ -1762,57 +1881,66 @@ func _apply_time_scale() -> void:
 	Engine.time_scale = game_speed * k
 
 
+
+## Позиция карты выбора на кольце вокруг попугая (для рисования и кликов игрока).
 ## Позиция карты выбора на кольце вокруг попугая (для рисования и кликов игрока).
 func levelup_card_pos(i: int) -> Vector2:
 	var n: int = levelup["cards"].size()
-	var t: float = levelup["t"]
-	var ring := 130.0 * (0.6 + 0.4 * clampf(t / 0.3, 0.0, 1.0))
+	var appear := clampf(float(levelup.get("appear", 0.0)) / 0.3, 0.0, 1.0)
+	var ring := 120.0 * (0.6 + 0.4 * appear)
 	var a := -PI * 0.5 + TAU * float(i) / float(n)
 	return hero.pos + Vector2(cos(a), sin(a)) * ring
 
 
-## Окно игрока: пока попугай думает, можно ткнуть в одну карту и запретить её.
-func levelup_block_open() -> bool:
-	if levelup.is_empty() or int(levelup["blocked"]) >= 0:
-		return false
-	return bool(levelup["tut"]) or float(levelup["t"]) < LU_BLOCK
 
+## Окно игрока: пока попугай думает, можно ткнуть в одну карту и запретить её.
+## Сначала игрок запрещает одно умение (без таймера), потом попугай выбирает из оставшихся.
+func levelup_block_open() -> bool:
+	return not levelup.is_empty() and bool(levelup["need_block"]) and int(levelup["blocked"]) < 0
 
 func _try_block(p: Vector2) -> bool:
 	if not levelup_block_open():
 		return false
 	for i in levelup["cards"].size():
-		if p.distance_to(levelup_card_pos(i)) < 38.0:
-			levelup["blocked"] = i
-			var c: Dictionary = levelup["cards"][i]
-			var best := -1
-			for j in levelup["cards"].size():
-				if j != i and (best < 0 or float(levelup["scores"][j]["score"]) > float(levelup["scores"][best]["score"])):
-					best = j
-			var was_fav: bool = int(levelup["chosen"]) == i
-			if best >= 0:
-				levelup["chosen"] = best
-			if was_fav:
-				hero.say("Эй! Я хотел %s!" % String(Skills.NAMES[c["key"]]))
-			log_event("ИГРОК", "запрет умения: %s" % Skills.NAMES[c["key"]])
-			sfx("trap", -4.0, 1.3)
-			if bool(levelup["tut"]):
-				# после обучения время идёт дальше с начала окна выбора
-				levelup["t"] = LU_BLOCK
-				save["tut_block"] = true
-				Save.store(save)
+		if p.distance_to(levelup_card_pos(i)) < 34.0:
+			_block_card(i)
 			return true
 	return false
 
 
+func _block_card(i: int) -> void:
+	levelup["blocked"] = i
+	var c: Dictionary = levelup["cards"][i]
+	var best := -1
+	for j in levelup["cards"].size():
+		if j != i and (best < 0 or float(levelup["scores"][j]["score"]) > float(levelup["scores"][best]["score"])):
+			best = j
+	var was_fav: bool = int(levelup["chosen"]) == i
+	if best >= 0:
+		levelup["chosen"] = best
+	if was_fav:
+		hero.say("Эй! Я хотел %s!" % String(Skills.NAMES[c["key"]]))
+	log_event("ИГРОК", "запрет умения: %s" % Skills.NAMES[c["key"]])
+	sfx("trap", -4.0, 1.3)
+	levelup["t"] = 0.0
+	if bool(levelup["tut"]) and not sim:
+		save["tut_block"] = true
+		Save.store(save)
+
 func _update_levelup(real_dt: float) -> void:
 	if levelup.is_empty() or paused or over != "":
 		return
-	if bool(levelup["tut"]) and int(levelup["blocked"]) < 0 and float(levelup["t"]) >= 0.4:
-		levelup["wait"] = float(levelup.get("wait", 0.0)) + real_dt
-		if shot_at > 0.0 and float(levelup["wait"]) > 1.0:
-			_try_block(levelup_card_pos(0))
-		return # обучение: ждём, пока игрок ткнёт в карту
+	levelup["appear"] = float(levelup.get("appear", 0.0)) + real_dt
+	if levelup_block_open():
+		levelup["wait"] = float(levelup["wait"]) + real_dt
+		if shot_at > 0.0 and float(levelup["wait"]) > 0.8:
+			if shot_block:
+				# снимок экрана запрета: лапка над картой, чтобы видно было подсказку
+				paw["pos"] = levelup_card_pos(1)
+				shot_at = time
+			else:
+				_block_card(int(levelup["chosen"]))
+		return # игра стоит, пока игрок не запретит одно умение
 	levelup["t"] = float(levelup["t"]) + real_dt
 	var t: float = levelup["t"]
 	if t >= LU_PICK and not levelup.has("picked"):
@@ -1830,6 +1958,7 @@ func _update_levelup(real_dt: float) -> void:
 		hero.say("Беру %s: %s." % [nm, r["reason"]])
 	if t >= LU_END:
 		levelup = {}
+
 
 
 # ---------- урон по герою и награды игроку ----------
@@ -2082,7 +2211,7 @@ func _full_bot() -> void:
 	if time >= _bot_throw:
 		_bot_throw = time + randf_range(2.0, 3.5)
 		for e in enemies_near(hero.pos, 7.0 * M, 20):
-			if e.grabbable() and e.pos.distance_to(hero.pos) > 3.0 * M:
+			if e.grabbable() and e.pos.distance_to(hero.pos) > 3.0 * M and (e.type != Enemy.T.SLIPPER or hero.fruits.size() > 0):
 				_try_grab(e.pos)
 				if held_e != null:
 					var aim := hero.pos + hero.vel * 0.3 + Vector2(randf_range(-40, 40), randf_range(-40, 40))

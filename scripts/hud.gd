@@ -361,7 +361,7 @@ func _draw_thoughts(fr: int) -> void:
 
 
 const BTN := {
-	"throw": ["grab", "Бросок носка", "ЛКМ/ПКМ", "зажать, потянуть, отпустить"],
+	"throw": ["grab", "Рогатка", "ЛКМ/ПКМ", "носок, тапок: оттяни и отпусти"],
 	"ram": ["ram", "Таран лапкой", "мышь", "резкий взмах в попугая"],
 	"millet": ["millet", "Подмена проса", "ЛКМ", "клик по колоску"],
 	"book": ["book", "Книга с полки", "Q", "тень 1,2 с, −15% здоровья"],
@@ -626,12 +626,18 @@ func _draw_paw(fr: int) -> void:
 		draw_dashed_line(p, m, Color(INK, 0.35), 1.5, 6.0)
 		draw_circle(m, 3.0, Color(INK, 0.4))
 	if holding:
-		# рогатка: куда полетит носок и с какой силой
+		# рогатка: резинка от предмета к лапке, стрелка — куда и как сильно полетит
+		var anc: Vector2 = game.sling_anchor + off
+		var nrm := (p - anc).normalized().rotated(PI * 0.5) * 14.0
+		draw_line(anc + nrm, p, Color("8a5a3a"), 3.0, true)
+		draw_line(anc - nrm, p, Color("8a5a3a"), 3.0, true)
 		var v: Vector2 = game.throw_vector()
 		if v != Vector2.ZERO:
-			var end := p + v.normalized() * (40.0 + v.length() * 0.12)
-			draw_dashed_line(p, end, Color(0.42, 0.31, 0.7, 0.9), 3.0, 8.0)
-			draw_polyline(PackedVector2Array([end + v.normalized().rotated(2.5) * 14.0, end, end + v.normalized().rotated(-2.5) * 14.0]), Color(0.42, 0.31, 0.7, 0.9), 3.0)
+			var power: float = v.length() / game.SOCK_SPEED
+			var end: Vector2 = anc + v.normalized() * (50.0 + 220.0 * power)
+			var col := Color(0.42, 0.31, 0.7).lerp(Color(0.9, 0.35, 0.1), power)
+			draw_dashed_line(anc, end, Color(col, 0.9), 3.0 + 3.0 * power, 10.0)
+			draw_polyline(PackedVector2Array([end + v.normalized().rotated(2.5) * 16.0, end, end + v.normalized().rotated(-2.5) * 16.0]), col, 4.0)
 		var k: float = clampf(game.hold_t / game.HOLD_TIME, 0.0, 1.0)
 		var br := Rect2(p + Vector2(-26, -44), Vector2(52, 7))
 		draw_rect(br, Color(1, 1, 1, 0.85))

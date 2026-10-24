@@ -1090,21 +1090,19 @@ func _memory_lines(mem: Dictionary) -> Array[String]:
 	return out
 
 
+## Лапка — системный курсор (без задержки). Здесь — только то, что вокруг неё:
+## резинка рогатки, кольцо отката, вспышка готовности, кольцо тарана.
 func _draw_paw(fr: int) -> void:
 	var off: Vector2 = game.world.position
 	for tr in game.paw_trail:
 		var a := clampf(float(tr["t"]) / 0.3, 0.0, 1.0)
 		draw_line(Vector2(tr["a"]) + off, Vector2(tr["b"]) + off, Color(INK, 0.35 * a), 2.0, true)
-	var p: Vector2 = game.paw["pos"] + off
-	var bruised: bool = game.paw_bruise > 0.0
+	var p: Vector2 = game.paw["pos"]
 	var holding: bool = game.held_e != null
-	var m := get_global_mouse_position()
-	if bruised:
-		draw_dashed_line(p, m, Color(INK, 0.35), 1.5, 6.0)
-		draw_circle(m, 3.0, Color(INK, 0.4))
+	var sk: Dictionary = PawCursor.SKINS.get(game.cursor_skin(), PawCursor.SKINS["white"])
 	if holding:
-		# рогатка: резинка от предмета к лапке, стрелка — куда и как сильно полетит
 		var anc: Vector2 = game.sling_anchor + off
+		p += off
 		var nrm := (p - anc).normalized().rotated(PI * 0.5) * 14.0
 		draw_line(anc + nrm, p, Color("8a5a3a"), 3.0, true)
 		draw_line(anc - nrm, p, Color("8a5a3a"), 3.0, true)
@@ -1115,31 +1113,25 @@ func _draw_paw(fr: int) -> void:
 			var col := Color(0.42, 0.31, 0.7).lerp(Color(0.9, 0.35, 0.1), power)
 			draw_dashed_line(anc, end, Color(col, 0.9), 3.0 + 3.0 * power, 10.0)
 			draw_polyline(PackedVector2Array([end + v.normalized().rotated(2.5) * 16.0, end, end + v.normalized().rotated(-2.5) * 16.0]), col, 4.0)
-		var k: float = clampf(game.hold_t / game.HOLD_TIME, 0.0, 1.0)
+		var k: float = clampf(game.hold_t / (game.HOLD_TIME + game.pk("hold")), 0.0, 1.0)
 		var br := Rect2(p + Vector2(-26, -44), Vector2(52, 7))
 		draw_rect(br, Color(1, 1, 1, 0.85))
 		draw_rect(Rect2(br.position, Vector2(br.size.x * k, br.size.y)), Color("e0a92e") if k > 0.35 else Color("d95c4a"))
 		draw_rect(br, INK, false, 1.5)
-	var fill := Color("d9dbe8") if bruised else Color("fffaf2")
-	var sd := 77 + fr
-	# поджатые пальцы: идёт откат броска или лапка держит носок
-	var curl := 0.0
-	if holding:
-		curl = 4.0
-	elif game.throw_cd > 0.0:
-		curl = 2.0 + 2.0 * clampf(game.throw_cd / game.THROW_CD, 0.0, 1.0)
-	var toes := [Vector2(-13, -10), Vector2(-5, -17), Vector2(5, -17), Vector2(13, -10)]
-	for k in 4:
-		var tp: Vector2 = p + Vector2(toes[k]) * (1.0 - curl * 0.05) + Vector2(0, curl)
-		Art.blob(self, tp, 5.5, 6.0 - curl * 0.3, fill, 3.0, sd + k)
-		draw_circle(tp + Vector2(0, 1), 2.4, Color("f3a7b5"))
-	Art.blob(self, p + Vector2(0, 4), 15.0, 12.5, fill, 3.0, sd)
-	Art.fill_blob(self, p + Vector2(0, 6), 7.0, 5.5, Color("f3a7b5"))
-	if bruised:
-		for k in 3:
-			var a := Time.get_ticks_msec() * 0.006 + k * TAU / 3.0
-			var sp := p + Vector2(cos(a) * 20.0, -24 + sin(a) * 6.0)
-			draw_circle(sp, 2.5, Color("f6cd56"))
-			draw_arc(sp, 2.5, 0, TAU, 8, INK, 1.0)
-	elif game.time >= game.RAM_UNLOCK and game.paw_vel.length() > game.RAM_SPEED and not holding:
+		PawCursor.draw_paw(self, p, sk, 4.0, false)
+		return
+	if game.cursor_imgs.is_empty():
+		# пока картинки курсора не готовы (или в снимках) — рисуем лапку сами
+		PawCursor.draw_paw(self, p, sk, 4.0 if game.throw_cd > 0.0 else 0.0, game.throw_cd > 0.0 or game.paw_bruise > 0.0)
+	if game.over != "" or game.phase != "play":
+		return
+	# откат рогатки: кольцо вокруг лапки заполняется, пока не будет готово
+	if game.throw_cd > 0.0:
+		var k2: float = 1.0 - clampf(game.throw_cd / game.throw_cd_full(), 0.0, 1.0)
+		draw_arc(p, 30.0, 0, TAU, 32, Color(INK, 0.18), 5.0, true)
+		draw_arc(p, 30.0, -PI * 0.5, -PI * 0.5 + TAU * k2, 32, Color(0.42, 0.31, 0.7, 0.85), 5.0, true)
+	if game.throw_ready_flash > 0.0:
+		var f: float = game.throw_ready_flash / 0.45
+		draw_arc(p, 30.0 + 18.0 * (1.0 - f), 0, TAU, 32, Color(0.42, 0.31, 0.7, f), 4.0, true)
+	if game.paw_bruise <= 0.0 and game.time >= game.RAM_UNLOCK and game.paw_vel.length() > game.RAM_SPEED * (1.0 - game.pk("ram_easy")):
 		draw_arc(p + Vector2(0, -2), 26.0, 0, TAU, 24, Color(0.42, 0.31, 0.7, 0.6), 2.5, true)

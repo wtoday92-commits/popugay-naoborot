@@ -76,6 +76,11 @@ func _draw() -> void:
 			2:
 				_draw_hero(fr)
 	_draw_orbit(fr)
+	# что схватит лапка: подсветка, только когда рогатка готова
+	if game.phase == "play" and game.over == "" and game.held_e == null and game.throw_cd <= 0.0 and game.levelup.is_empty():
+		var gt = game.grab_target(game.paw["pos"])
+		if gt != null:
+			draw_arc(gt.pos, gt.radius + 9.0, 0, TAU, 24, Color(0.42, 0.31, 0.7, 0.9), 3.0, true)
 	for s in game.shots:
 		var p: Vector2 = s["pos"]
 		var d: Vector2 = Vector2(s["vel"]).normalized()

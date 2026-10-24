@@ -35,8 +35,7 @@ const MILLET_CD := 30.0
 const PAW_PUSH_R := 1.5 * M
 const PAW_HIT_R := 26.0
 const PAW_PUSH_MAX := 12
-const PAW_BRUISE := 4.0
-const PAW_BRUISED_SPEED := 380.0
+const PAW_BRUISE := 1.6
 const GRAB_R := 28.0
 const THROW_CD := 3.0
 const MAX_ENEMIES := 160
@@ -206,6 +205,12 @@ var hero_dodges := 0
 ## Отладка штаба: `--enh=throw,ram` покупает все узлы и усиливает эти деревья, `--waves=socks,calm,...` — составы.
 var hq_test: Array = []
 var waves_test: Array = []
+## Системный курсор-лапка: картинки по состояниям и текущее состояние.
+var cursor_imgs := {}
+var cursor_state := ""
+var _cursor_building := false
+var throw_ready_flash := 0.0
+var _was_cd := false
 var _st_done := {}
 
 
@@ -259,8 +264,46 @@ func _ready() -> void:
 	if not sim:
 		audio = Sfx.new()
 		add_child(audio)
-		Input.mouse_mode = Input.MOUSE_MODE_HIDDEN
+		Input.use_accumulated_input = false
+		get_tree().root.size_changed.connect(_build_cursors)
+		_build_cursors()
 	start_run()
+
+
+func cursor_skin() -> String:
+	return String(save.get("cursor", "white"))
+
+
+func _build_cursors() -> void:
+	if _cursor_building:
+		return
+	_cursor_building = true
+	var k := float(DisplayServer.window_get_size().x) / 1920.0
+	var px := clampi(int(round(PawCursor.SIZE * clampf(k, 0.5, 1.4))), 32, 128)
+	cursor_imgs = await PawCursor.build(self, cursor_skin(), px)
+	if shot_at > 0.0:
+		cursor_imgs["cd"].save_png("user://cursor_cd.png")
+	cursor_state = ""
+	_cursor_building = false
+
+
+## Курсор по состоянию лапки: готова, рогатка в откате, ушиб; с предметом в рогатке лапку рисует игра.
+func _update_cursor() -> void:
+	if cursor_imgs.is_empty():
+		return
+	var st := "ready"
+	if held_e != null:
+		st = "empty"
+	elif paw_bruise > 0.0:
+		st = "bruised"
+	elif throw_cd > 0.0 and phase == "play" and over == "":
+		st = "cd"
+	if st == cursor_state:
+		return
+	cursor_state = st
+	var img: Image = cursor_imgs[st]
+	var hot: Vector2 = PawCursor.HOT * float(img.get_width()) / float(PawCursor.SIZE)
+	Input.set_custom_mouse_cursor(img, Input.CURSOR_ARROW, hot)
 
 
 func new_id() -> int:
@@ -415,6 +458,15 @@ func _process(delta: float) -> void:
 	banners = banners.filter(func(b): return float(b["t"]) < float(b["dur"]))
 	hint_t = maxf(0.0, hint_t - real_dt)
 	power_flash = maxf(0.0, power_flash - real_dt)
+	throw_ready_flash = maxf(0.0, throw_ready_flash - real_dt)
+	var in_cd := throw_cd > 0.0
+	if _was_cd and not in_cd and over == "" and held_e == null:
+		# рогатка снова готова: вспышка у лапки и щелчок
+		throw_ready_flash = 0.45
+		sfx("tick", -6.0, 1.6)
+	_was_cd = in_cd
+	if not sim:
+		_update_cursor()
 	shake = maxf(0.0, shake - real_dt * 30.0)
 	world.position = Vector2(randf_range(-shake, shake), randf_range(-shake, shake)) if shake > 0.1 else Vector2.ZERO
 	if audio != null and hero != null:
@@ -617,9 +669,8 @@ func _update_paw(dt: float) -> void:
 	var old: Vector2 = paw["pos"]
 	var p := m
 	if paw_bruise > 0.0:
+		# ушибленная лапка двигается как обычно, только не таранит
 		paw_bruise = maxf(0.0, paw_bruise - dt)
-		# ушибленная лапка отстаёт от мыши
-		p = old.move_toward(m, PAW_BRUISED_SPEED * dt)
 	if held_e != null:
 		# рогатка: лапка привязана к резинке и не уходит дальше натяга (и мышь тоже)
 		var lim := sling_max()
@@ -726,7 +777,7 @@ func apply_ram(dir: Vector2) -> void:
 		paw_bruise = 0.0
 	else:
 		combo_flip = false
-		paw_bruise = maxf(1.0, PAW_BRUISE - pk("ram_bruise"))
+		paw_bruise = maxf(0.5, PAW_BRUISE - pk("ram_bruise"))
 	rams += 1
 	pstat_add("rams")
 	shake = maxf(shake, 5.0)
@@ -781,12 +832,7 @@ func _try_grab(p: Vector2) -> void:
 		return
 	if held_e != null or paw_bruise > 0.0 or over != "" or paused or not FIELD.has_point(p):
 		return
-	var best: Enemy = null
-	var bd := GRAB_R + pk("grab_r")
-	for e in enemies_near(p, bd + 12.0, 6):
-		if e.grabbable() and p.distance_to(e.pos) < bd + e.radius * 0.5:
-			best = e
-			bd = p.distance_to(e.pos)
+	var best := grab_target(p)
 	if best == null:
 		return
 	held_e = best
@@ -795,6 +841,17 @@ func _try_grab(p: Vector2) -> void:
 	enemies.erase(best)
 	best.push_vel = Vector2.ZERO
 	sfx("grab", -4.0, randf_range(0.9, 1.1))
+
+
+## Что схватит лапка в этой точке (ближайший носок, клубок, пылинка или тапок).
+func grab_target(p: Vector2) -> Enemy:
+	var best: Enemy = null
+	var bd := GRAB_R + pk("grab_r")
+	for e in enemies_near(p, bd + 12.0, 6):
+		if e.grabbable() and p.distance_to(e.pos) < bd + e.radius * 0.5:
+			best = e
+			bd = p.distance_to(e.pos)
+	return best
 
 
 func _drop_held() -> void:

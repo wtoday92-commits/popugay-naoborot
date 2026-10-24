@@ -16,12 +16,12 @@ const PLAYER := [
 
 ## Прокачка попугая за просо: он покупает сам, по своим приоритетам.
 const PARROT := [
-	{"key": "hp", "name": "Крепкие перья", "desc": "+15 здоровья", "base": 160, "max": 6},
-	{"key": "dmg", "name": "Острый клюв", "desc": "+10% урона", "base": 200, "max": 6},
-	{"key": "speed", "name": "Быстрые лапки", "desc": "+5% скорости", "base": 150, "max": 4},
-	{"key": "magnet", "name": "Длинная шея", "desc": "+15% радиус сбора", "base": 120, "max": 3},
-	{"key": "start", "name": "Разминка", "desc": "+1 стартовый уровень", "base": 450, "max": 3},
-	{"key": "eye", "name": "Зоркий глаз", "desc": "+1 слот внимания", "base": 1100, "max": 1},
+	{"key": "hp", "name": "Крепкие перья", "desc": "+15 здоровья", "base": 140, "max": 6},
+	{"key": "dmg", "name": "Острый клюв", "desc": "+10% урона", "base": 175, "max": 6},
+	{"key": "speed", "name": "Быстрые лапки", "desc": "+5% скорости", "base": 140, "max": 4},
+	{"key": "magnet", "name": "Длинная шея", "desc": "+15% радиус сбора", "base": 110, "max": 3},
+	{"key": "start", "name": "Разминка", "desc": "+1 стартовый уровень", "base": 400, "max": 3},
+	{"key": "eye", "name": "Зоркий глаз", "desc": "+1 слот внимания", "base": 1000, "max": 1},
 ]
 
 const ACHIEVEMENTS := [
@@ -52,7 +52,7 @@ static func defaults() -> Dictionary:
 
 
 static func up_cost(item: Dictionary, lvl: int) -> int:
-	return int(float(item["base"]) * pow(1.5, lvl))
+	return int(float(item["base"]) * pow(1.65, lvl))
 
 
 ## Ярус открыт, когда куплено всё в предыдущем ярусе.
@@ -69,9 +69,9 @@ static func unlocked(meta: Dictionary, key: String) -> bool:
 	return meta.get("unlocked", {}).has(key)
 
 
-## Перья за забег: 2 за участие, до 3 за урон по попугаю, по одному за сорванный ивент, +3 за победу.
+## Перья за забег: 3 за участие, до 3 за урон по попугаю, по одному за сорванный ивент, +3 за победу.
 static func feathers_for(player_damage: float, events_denied: int, player_won: bool) -> int:
-	return 2 + mini(3, int(player_damage / 45.0)) + events_denied + (3 if player_won else 0)
+	return 3 + mini(3, int(player_damage / 45.0)) + events_denied + (3 if player_won else 0)
 
 
 static func quest_done(key: String, r: Dictionary) -> bool:

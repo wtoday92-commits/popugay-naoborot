@@ -9,6 +9,9 @@ const FIELD := Rect2(340, 0, 1240, 1080)
 const RUN_LENGTH := 300.0
 const HORDE_STEP := 60.0
 const ENRAGE_AT := 360.0
+const HORDE_HP_GONG := 0.08
+const HORDE_HP_LEVEL := 0.03
+const HORDE_DMG_LEVEL := 0.015
 const BOSS_AT := 240.0
 const EVENT_SLOTS := [40.0, 95.0, 150.0, 200.0]
 const EVENT_WARN := 10.0
@@ -58,7 +61,7 @@ const EDEFS := [
 	{"name": "Суперносок", "hp": 70.0, "speed": 2.0, "dmg": 9.0, "r": 15.0, "push": 0.6, "xp": 5},
 	{"name": "Пылевой зайчик", "hp": 10.0, "speed": 2.6, "dmg": 4.0, "r": 9.0, "push": 1.0, "xp": 1},
 	{"name": "Шкатулка", "hp": 80.0, "speed": 2.6, "dmg": 0.0, "r": 16.0, "push": 0.0, "xp": 0},
-	{"name": "Пылесос", "hp": 1000.0, "speed": 1.1, "dmg": 13.0, "r": 56.0, "push": 0.0, "xp": 0},
+	{"name": "Пылесос", "hp": 900.0, "speed": 1.1, "dmg": 13.0, "r": 56.0, "push": 0.0, "xp": 0},
 ]
 
 var floor_rect := Rect2(372, 34, 1176, 1012)
@@ -1001,13 +1004,15 @@ func spawn_enemy(type: int, p: Vector2, from_player: bool = false) -> Enemy:
 	e.pos = p
 	e.born = time
 	var l := float(horde_level - 1)
-	var hp_k := 1.0 + 0.2 * l
+	# орда растёт и от гонга, и от каждого уровня попугая (как в SurvivorsStarterKit)
+	var hl := float(hero.level - 1)
+	var hp_k := (1.0 + HORDE_HP_GONG * l) * (1.0 + HORDE_HP_LEVEL * hl)
 	if type == Enemy.T.BOSS or type == Enemy.T.BOX:
 		hp_k = 1.0 + 0.05 * float(hero.level)
 	e.max_hp = float(d["hp"]) * hp_k
 	e.hp = e.max_hp
 	e.speed = float(d["speed"]) * M * (1.0 + 0.03 * l)
-	e.dmg = float(d["dmg"]) * (1.0 + 0.1 * l)
+	e.dmg = float(d["dmg"]) * (1.0 + 0.06 * l) * (1.0 + HORDE_DMG_LEVEL * hl)
 	e.radius = d["r"]
 	e.push_factor = d["push"]
 	e.xp = d["xp"]
@@ -1928,6 +1933,8 @@ func _make_cards() -> Array:
 
 func begin_levelup() -> void:
 	hero.consume_level()
+	if not sim:
+		add_text(hero.pos + Vector2(0, -96), "орда крепнет: +%d%%" % int(round(HORDE_HP_LEVEL * 100.0 * float(hero.level - 1))), Color("3f6fb5"), 16)
 	var cards := _make_cards()
 	if cards.is_empty():
 		hero.hp = minf(hero.max_hp(), hero.hp + 20.0)
@@ -2528,6 +2535,10 @@ func _save_run(feathers: int) -> void:
 			wins[k] = int(wins.get(k, 0)) + 1
 	mem["picks"] = picks
 	mem["wins"] = wins
+	var plans: Array = mem.get("plans", [])
+	if hero.plan.size() > 0:
+		plans.append(hero.plan[0])
+	mem["plans"] = plans.slice(maxi(0, plans.size() - 8))
 	if over == "hero_dead":
 		var top := ""
 		var tv := 0.0

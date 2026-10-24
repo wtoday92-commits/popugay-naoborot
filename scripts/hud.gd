@@ -346,7 +346,7 @@ func _draw_top(h: Hero, fr: int) -> void:
 	else:
 		Art.text_c(self, font, Vector2(x + 170, 58), "сломан", 36, Color("4f8f3a"))
 	var nxt: float = game.next_horde - game.time
-	Art.text_c(self, font, Vector2(x + 170, 106), "Орда: уровень %d · гонг через %s" % [game.horde_level, mmss(nxt)], 15, Color("3f6fb5"))
+	Art.text_c(self, font, Vector2(x + 170, 106), "Орда: ур. %d · +%d%% от уровня Кеши · гонг %s" % [game.horde_level, int(round(game.HORDE_HP_LEVEL * 100.0 * float(h.level - 1))), mmss(nxt)], 14, Color("3f6fb5"))
 	var hero_p := h.power() * 2.0 + float(h.level)
 	var horde_p: float = float(game.horde_level) * 4.0 + game.player_damage / 20.0 + 2.0
 	var k: float = hero_p / (hero_p + horde_p)

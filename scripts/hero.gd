@@ -22,6 +22,7 @@ var quests: Array = []
 var meta_up := {}
 var learned_picks := {}
 var learned_wins := {}
+var learned_plans: Array = []
 
 var game
 var pos := Vector2.ZERO
@@ -132,6 +133,7 @@ func learn(mem: Dictionary) -> void:
 	learned_dealt = mem.get("dealt", {})
 	learned_picks = mem.get("picks", {})
 	learned_wins = mem.get("wins", {})
+	learned_plans = mem.get("plans", [])
 	memory_notes.clear()
 	plan = [_choose_plan()]
 	if learned_runs <= 0:
@@ -160,7 +162,12 @@ func _choose_plan() -> String:
 	if randf() < 0.25:
 		return Skills.SKILLS[randi() % Skills.SKILLS.size()]
 	for k in Skills.SKILLS:
-		var sc := _learned_bonus(k) + randf_range(0.0, 2.0)
+		# усталость от одного и того же: каждый повтор среди трёх последних планов — минус
+		var recent := 0
+		for pl in learned_plans.slice(maxi(0, learned_plans.size() - 3)):
+			if pl == k:
+				recent += 1
+		var sc := _learned_bonus(k) + randf_range(0.0, 2.0) - 1.3 * recent
 		if sc > bs:
 			bs = sc
 			best = k
@@ -181,7 +188,7 @@ func _learned_bonus(k: String) -> float:
 		for v in vals:
 			mean += float(v)
 		mean /= float(vals.size())
-		b += clampf((float(learned_dealt[k]) - mean) * 8.0, -1.2, 1.2)
+		b += clampf((float(learned_dealt[k]) - mean) * 6.0, -0.8, 0.8)
 	var picks := int(learned_picks.get(k, 0))
 	if picks >= 2:
 		var wr := float(learned_wins.get(k, 0)) / float(picks)
@@ -221,7 +228,7 @@ func has_mod(k: String) -> bool:
 
 
 func max_hp() -> float:
-	return 100.0 + 15.0 * int(meta_up.get("hp", 0)) + 20.0 * lvl_of("fluff")
+	return 110.0 + 15.0 * int(meta_up.get("hp", 0)) + 20.0 * lvl_of("fluff")
 
 
 func speed() -> float:
@@ -229,7 +236,7 @@ func speed() -> float:
 
 
 func dmg_mult() -> float:
-	var m := 1.0 + 0.1 * int(meta_up.get("dmg", 0)) + 0.1 * lvl_of("beak")
+	var m := 1.15 + 0.1 * int(meta_up.get("dmg", 0)) + 0.1 * lvl_of("beak")
 	if randf() < 0.08 * lvl_of("luck"):
 		m *= 2.0
 	return m

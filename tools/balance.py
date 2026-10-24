@@ -39,6 +39,14 @@ def summarize(rows, title):
         for k, v in r["taken"].items():
             taken[k] = taken.get(k, 0) + v / tot / len(rows)
     print("  урон по герою (доли): " + ", ".join(f"{k} {100 * v:.0f}%" for k, v in sorted(taken.items(), key=lambda x: -x[1])[:6]))
+    for key in ("millet", "kills", "level", "chests", "fruits", "rams"):
+        vals = sorted(r[key] for r in rows)
+        print(f"  {key}: медиана {statistics.median(vals)}, 25% {vals[len(vals) // 4]}, 75% {vals[3 * len(vals) // 4]}")
+    q = {}
+    for r in rows:
+        for k, v in r["qall"].items():
+            q[k] = q.get(k, 0) + (1 if v else 0)
+    print("  квесты (доля забегов, где выполнены): " + ", ".join(f"{k} {100 * v // len(rows)}%" for k, v in q.items()))
     print(f"  ивенты пройдено в среднем: {statistics.mean([r['events'] for r in rows]):.1f} из {rows[0]['events_total']}")
     return rows
 

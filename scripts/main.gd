@@ -519,6 +519,8 @@ func _mouse_button(mb: InputEventMouseButton) -> void:
 				start_run()
 			elif act.begins_with("buy:"):
 				buy_unlock(act.substr(4))
+			elif act.begins_with("sling:"):
+				buy_sling(act.substr(6))
 			return
 		_outro_click(p)
 		return
@@ -534,7 +536,7 @@ func _mouse_button(mb: InputEventMouseButton) -> void:
 		if not menu.is_empty():
 			_menu_click(p)
 			return
-		if millet_cd <= 0.0 and millet_unlocked and ability_unlocked("millet"):
+		if millet_cd <= 0.0 and millet_unlocked and ability_unlocked("millet") and levelup.is_empty():
 			var g = _gem_at(p)
 			if g != null:
 				menu = {"gem": g, "t": 0.0}
@@ -560,7 +562,12 @@ func _update_paw(dt: float) -> void:
 		# ушибленная лапка отстаёт от мыши
 		p = old.move_toward(m, PAW_BRUISED_SPEED * dt)
 	if held_e != null:
-		# рогатка: предмет держится на месте, лапка тянет резинку; на выстрел пара секунд
+		# рогатка: лапка привязана к резинке и не уходит дальше натяга (и мышь тоже)
+		var lim := sling_max()
+		if m.distance_to(sling_anchor) > lim:
+			p = sling_anchor + (m - sling_anchor).limit_length(lim)
+			if not sim:
+				get_viewport().warp_mouse(p)
 		if not paused and over == "":
 			hold_t -= dt
 			if hold_t <= 0.0:
@@ -578,7 +585,7 @@ func _update_paw(dt: float) -> void:
 		tr["t"] = float(tr["t"]) - dt
 	paw_trail = paw_trail.filter(func(tr): return float(tr["t"]) > 0.0)
 	if held_e != null:
-		var pull: Vector2 = (p - sling_anchor).limit_length(SLING_MAX)
+		var pull: Vector2 = (p - sling_anchor).limit_length(sling_max())
 		held_e.pos = sling_anchor + pull * 0.15 + Vector2(sin(Time.get_ticks_msec() * 0.03) * 1.5, 0)
 	if not paused and over == "" and hero != null and held_e == null:
 		_check_ram(old, p, v)
@@ -589,7 +596,7 @@ static func seg_dist(p: Vector2, a: Vector2, b: Vector2) -> float:
 
 
 func _check_ram(a: Vector2, b: Vector2, v: Vector2) -> void:
-	if time < RAM_UNLOCK or paw_bruise > 0.0 or hero.ram_immune > 0.0:
+	if time < RAM_UNLOCK or paw_bruise > 0.0 or hero.ram_immune > 0.0 or not levelup.is_empty():
 		return
 	var spd := maxf(paw_vel.length(), v.length() * 0.7)
 	if spd < RAM_SPEED:
@@ -656,7 +663,7 @@ func _paw_push(delta: float) -> void:
 
 
 func _try_grab(p: Vector2) -> void:
-	if throw_cd > 0.0:
+	if throw_cd > 0.0 or not levelup.is_empty():
 		return
 	if held_e != null or paw_bruise > 0.0 or over != "" or paused or not FIELD.has_point(p):
 		return
@@ -692,10 +699,11 @@ func _drop_held() -> void:
 func throw_vector() -> Vector2:
 	if held_e == null:
 		return Vector2.ZERO
-	var pull: Vector2 = (Vector2(paw["pos"]) - sling_anchor).limit_length(SLING_MAX)
+	var lim := sling_max()
+	var pull: Vector2 = (Vector2(paw["pos"]) - sling_anchor).limit_length(lim)
 	if pull.length() < 18.0:
 		return Vector2.ZERO
-	var spd := SOCK_SPEED * pull.length() / SLING_MAX
+	var spd := sling_speed() * pull.length() / lim
 	if held_e.type == Enemy.T.SLIPPER:
 		spd *= 0.55
 	return -pull.normalized() * spd
@@ -724,8 +732,8 @@ func _update_thrown(delta: float) -> void:
 		var v: Vector2 = s["vel"]
 		var p: Vector2 = s["pos"] + v * delta
 		s["dist"] = float(s["dist"]) + v.length() * delta
-		# носок разгорается в полёте: чем дальше летит, тем «огненнее» и больнее
-		if not slipper:
+		# ветка «Огненный носок»: носок разгорается в полёте, чем дальше — тем больнее
+		if not slipper and sling_branch() == "fire":
 			s["fire"] = clampf(float(s["dist"]) / (9.0 * M), 0.0, 1.0)
 		s["spin"] = float(s["spin"]) + delta * (10.0 if slipper else 18.0)
 		v *= exp(-(0.9 if slipper else 0.45) * delta)
@@ -741,16 +749,21 @@ func _update_thrown(delta: float) -> void:
 		elif p.distance_to(hero.pos) < hero.radius + e.radius + 4.0:
 			hero.wariness["throw"] = minf(0.6, float(hero.wariness["throw"]) + 0.15)
 			var dist_m: float = float(s["dist"]) / M
-			var label := "Брошенный тапок" if slipper else ("Огненный носок" if float(s["fire"]) > 0.6 else "Брошенный носок")
+			var nm := String(EDEFS[e.type]["name"]).to_lower()
+			var label := ("Огненный " if float(s["fire"]) > 0.6 else "Брошенный ") + nm
 			if slipper:
-				hero.take_damage(7.0, "throw", label, true)
-				# тапок выбивает фрукты: издалека — два
-				_knock_fruits(2 if dist_m > 9.0 else 1, v.normalized())
+				hero.take_damage(6.0, "throw", label, true)
+				# ветка «Тапок-выбивала»: выбивает фрукты, издалека — два
+				if sling_branch() == "knock":
+					_knock_fruits(2 if dist_m > 9.0 else 1, v.normalized())
 				hero.knocked(v.normalized(), 260.0, 0.3)
-			else:
-				hero.take_damage(2.0 + 1.1 * dist_m, "throw", label, true)
+			elif sling_branch() == "fire":
+				hero.take_damage(2.0 + 1.0 * dist_m, "throw", label, true)
 				hero.knocked(v.normalized(), 180.0, 0.15)
-				if float(s["fire"]) > 0.6:
+			else:
+				hero.take_damage(3.0 + 0.3 * dist_m, "throw", label, true)
+				hero.knocked(v.normalized(), 140.0, 0.1)
+			if float(s["fire"]) > 0.6:
 					add_fx({"kind": "fire", "pos": hero.pos, "r": 50.0, "dur": 0.4})
 			throws_hit += 1
 			land = true
@@ -876,7 +889,7 @@ func _update_missiles(delta: float) -> void:
 # ---------- кнопки игрока ----------
 
 func cast_meteor() -> void:
-	if over != "" or paused or meteor_cd > 0.0 or phase != "play" or not ability_unlocked("book"):
+	if over != "" or paused or meteor_cd > 0.0 or phase != "play" or not ability_unlocked("book") or not levelup.is_empty():
 		return
 	var p: Vector2 = paw["pos"]
 	if not sim and not FIELD.has_point(p):
@@ -892,7 +905,7 @@ func cast_meteor() -> void:
 
 ## Корзина-ловушка: под лапкой 2 с растёт тень, потом сверху падает корзина и накрывает того, кто под ней.
 func cast_wave() -> void:
-	if over != "" or paused or phase != "play" or not ability_unlocked("basket") or wave_cd > 0.0:
+	if over != "" or paused or phase != "play" or not ability_unlocked("basket") or wave_cd > 0.0 or not levelup.is_empty():
 		return
 	var p: Vector2 = paw["pos"]
 	if not sim and not FIELD.has_point(p):
@@ -1901,8 +1914,22 @@ func on_fruit_eaten(f: String) -> void:
 const LU_PICK := 1.2
 const LU_SLOW := 1.8
 const LU_END := 2.4
-const SLING_MAX := 170.0
-const SOCK_SPEED := 1700.0
+const SLING_BASE := 110.0
+const SLING_STEP := 30.0
+const SOCK_SPEED_BASE := 1000.0
+const SOCK_SPEED_STEP := 250.0
+
+
+func sling_max() -> float:
+	return SLING_BASE + SLING_STEP * Meta.sling_power(meta)
+
+
+func sling_speed() -> float:
+	return SOCK_SPEED_BASE + SOCK_SPEED_STEP * Meta.sling_power(meta)
+
+
+func sling_branch() -> String:
+	return Meta.sling_branch(meta)
 
 
 func _make_cards() -> Array:
@@ -1932,6 +1959,10 @@ func _make_cards() -> Array:
 
 
 func begin_levelup() -> void:
+	if held_e != null:
+		_drop_held()
+	menu = {}
+	aim = {}
 	hero.consume_level()
 	if not sim:
 		add_text(hero.pos + Vector2(0, -96), "орда крепнет: +%d%%" % int(round(HORDE_HP_LEVEL * 100.0 * float(hero.level - 1))), Color("3f6fb5"), 16)
@@ -1975,7 +2006,12 @@ func levelup_card_pos(i: int) -> Vector2:
 	var appear := clampf(float(levelup.get("appear", 0.0)) / 0.3, 0.0, 1.0)
 	var ring := 120.0 * (0.6 + 0.4 * appear)
 	var a := -PI * 0.5 + TAU * float(i) / float(n)
-	return hero.pos + Vector2(cos(a), sin(a)) * ring
+	return levelup_center() + Vector2(cos(a), sin(a)) * ring
+
+
+## Центр кольца: у попугая, но не ближе 200 px к краю поля, чтобы карты и подсказки помещались.
+func levelup_center() -> Vector2:
+	return hero.pos.clamp(FIELD.position + Vector2(210, 230), FIELD.end - Vector2(210, 200))
 
 
 
@@ -2209,7 +2245,7 @@ func _sim_step() -> void:
 			"сломан" if boss_defeated else ("жив" if boss != null else "не появился"), hero.events_done, events_denied,
 			meteor_hits, meteors_cast, kills, hero.chests_opened])
 		print("УРОН ПО ГЕРОЮ: ", dmg_by_src)
-		print("ДАННЫЕ ", JSON.stringify({"over": over, "time": snappedf(time, 0.1), "level": hero.level, "boss_hp": (boss.hp / boss.max_hp if boss != null and not boss.dead else 0.0), "boss": boss_defeated, "skills": hero.skills, "mods": hero.mods.values(), "general": hero.general, "taken": dmg_by_src, "dealt": dealt_by_src, "events": hero.events_done, "events_total": events_total, "millet": run_millet, "feathers": save.get("feathers", 0), "up": meta["parrot"]["up"], "quests": hero.quests, "player_dmg": int(player_damage), "unlocked": meta["unlocked"].keys(), "plan": hero.plan}))
+		print("ДАННЫЕ ", JSON.stringify({"over": over, "time": snappedf(time, 0.1), "level": hero.level, "boss_hp": (boss.hp / boss.max_hp if boss != null and not boss.dead else 0.0), "boss": boss_defeated, "skills": hero.skills, "mods": hero.mods.values(), "general": hero.general, "taken": dmg_by_src, "dealt": dealt_by_src, "events": hero.events_done, "events_total": events_total, "millet": run_millet, "feathers": save.get("feathers", 0), "up": meta["parrot"]["up"], "quests": hero.quests, "player_dmg": int(player_damage), "unlocked": meta["unlocked"].keys() + meta["sling"]["owned"].keys(), "plan": hero.plan, "kills": kills, "chests": hero.chests_opened, "fruits": fruits_eaten, "rams": rams, "hp_frac": hero.hp_frac(), "qall": _all_quests()}))
 		get_tree().quit()
 
 
@@ -2585,6 +2621,16 @@ func _save_run(feathers: int) -> void:
 		var again := true
 		while again:
 			again = false
+			for it in Meta.SLING:
+				if not it.get("soon", false) and not Meta.sling_owned(meta, it["key"]) and (String(it["req"]) == "" or Meta.sling_owned(meta, it["req"])) and int(save["feathers"]) >= int(it["cost"]):
+					save["feathers"] = int(save["feathers"]) - int(it["cost"])
+					meta["sling"]["owned"][it["key"]] = true
+					if it["branch"]:
+						meta["sling"]["branch"] = ["fire", "knock"][randi() % 2] if meta["sling"]["owned"].size() > 3 else it["key"]
+					again = true
+					break
+			if again:
+				continue
 			for it in Meta.PLAYER:
 				if not Meta.unlocked(meta, it["key"]) and Meta.tier_open(meta, int(it["tier"])) and int(save["feathers"]) >= int(it["cost"]):
 					save["feathers"] = int(save["feathers"]) - int(it["cost"])
@@ -2593,6 +2639,36 @@ func _save_run(feathers: int) -> void:
 					break
 	save["meta"] = meta
 	Save.store(save)
+
+
+## Рогатка: покупка силы натяга и веток; купленную ветку можно выбрать на забег.
+func buy_sling(key: String) -> bool:
+	var sl: Dictionary = meta.get("sling", {"owned": {}, "branch": ""})
+	meta["sling"] = sl
+	for it in Meta.SLING:
+		if it["key"] != key or it.get("soon", false):
+			continue
+		if sl["owned"].has(key):
+			if it["branch"]:
+				sl["branch"] = "" if sl["branch"] == key else key
+				Save.store(save)
+				sfx("tick", 0.0, 1.2)
+				return true
+			return false
+		if String(it["req"]) != "" and not sl["owned"].has(it["req"]):
+			sfx("fail", -8.0, 1.4)
+			return false
+		if int(save.get("feathers", 0)) < int(it["cost"]):
+			sfx("fail", -8.0, 1.4)
+			return false
+		save["feathers"] = int(save["feathers"]) - int(it["cost"])
+		sl["owned"][key] = true
+		if it["branch"] and String(sl["branch"]) == "":
+			sl["branch"] = key
+		Save.store(save)
+		sfx("level", -4.0)
+		return true
+	return false
 
 
 ## Покупка исследования игрока за перья (экран после забега).
@@ -2691,3 +2767,16 @@ static func _rect_gap(a: Rect2, b: Rect2) -> float:
 	var dx := maxf(0.0, maxf(a.position.x - b.end.x, b.position.x - a.end.x))
 	var dy := maxf(0.0, maxf(a.position.y - b.end.y, b.position.y - a.end.y))
 	return sqrt(dx * dx + dy * dy)
+
+
+## Для тестов: какие квесты были бы выполнены в этом забеге.
+func _all_quests() -> Dictionary:
+	var r := {
+		"boss": boss_defeated, "time": time, "hp_frac": hero.hp_frac(), "chests": hero.chests_opened,
+		"events": hero.events_done, "events_total": events_total, "kills": kills, "millet": run_millet,
+		"throw_dmg": float(dmg_by_src.get("throw", 0)), "fruits": fruits_eaten, "level": hero.level, "rams": rams,
+	}
+	var out := {}
+	for q in Meta.QUESTS:
+		out[q["key"]] = Meta.quest_done(q["key"], r)
+	return out

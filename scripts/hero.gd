@@ -236,7 +236,7 @@ func speed() -> float:
 
 
 func dmg_mult() -> float:
-	var m := 1.15 + 0.1 * int(meta_up.get("dmg", 0)) + 0.1 * lvl_of("beak")
+	var m := 1.08 + 0.1 * int(meta_up.get("dmg", 0)) + 0.1 * lvl_of("beak")
 	if randf() < 0.08 * lvl_of("luck"):
 		m *= 2.0
 	return m

@@ -879,7 +879,7 @@ func _draw_levelup(fr: int) -> void:
 	# затемнение: игра стоит
 	draw_rect(game.FIELD, Color(0.15, 0.1, 0.05, 0.25 * fade * appear))
 	_draw_hero(fr)
-	var center := h.pos
+	var center: Vector2 = game.levelup_center()
 	var ring := center.distance_to(game.levelup_card_pos(0))
 	draw_arc(center, ring, 0, TAU, 64, Color(0.95, 0.75, 0.25, 0.6 * fade), 4.0, true)
 	var hover := -1

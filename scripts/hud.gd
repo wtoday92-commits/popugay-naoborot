@@ -678,8 +678,7 @@ func _draw_player_meta(t: float) -> void:
 		for it in Meta.PLAYER:
 			if int(it["tier"]) == tier:
 				items.append(it)
-		_t(Vector2(x, y + 20), "Ярус %d" % (tier + 1), 17, INK if open else Color(INK, 0.4))
-		y += 32
+		_t(Vector2(x, unlock_rect(tier, 0).position.y - 8), "Ярус %d" % (tier + 1), 17, INK if open else Color(INK, 0.4))
 		for i in items.size():
 			var it: Dictionary = items[i]
 			var cr := unlock_rect(tier, i)
@@ -693,19 +692,60 @@ func _draw_player_meta(t: float) -> void:
 				_t(cr.position + Vector2(92, 34), String(it["name"]), 19)
 				draw_multiline_string(font, cr.position + Vector2(92, 58), String(it["desc"]), HORIZONTAL_ALIGNMENT_LEFT, 300, 14, 2, Color(INK, 0.75))
 				var tag := "открыто" if have else "%d перьев" % int(it["cost"])
-				_t(cr.position + Vector2(92, 106), tag, 15, Color("4f8f3a") if have else (Color("8a5a1e") if can else Color(INK, 0.5)))
+				_t(cr.position + Vector2(92, 98), tag, 15, Color("4f8f3a") if have else (Color("8a5a1e") if can else Color(INK, 0.5)))
 			else:
 				Art.text_c(self, font, cr.get_center() + Vector2(0, 8), "???", 26, Color(INK, 0.35))
 		y = unlock_rect(tier, 0).end.y + 10
 		if not open and not shown_locked:
 			shown_locked = true
 	if shown_locked or not Meta.tier_open(meta, 2):
-		Art.text_c(self, font, Vector2(r.get_center().x, r.end.y - 28), "Разблокируйте контент выше, чтобы открыть дальнейшие исследования", 17, Color(INK, 0.65))
+		Art.text_c(self, font, Vector2(r.get_center().x, unlock_rect(2, 0).end.y + 30), "Разблокируйте контент выше, чтобы открыть дальнейшие исследования", 16, Color(INK, 0.65))
+	_draw_sling_meta(feathers)
+
+
+## Рогатка: сила натяга и ветки. Купленную ветку кликом выбирают на следующий забег.
+func _draw_sling_meta(feathers: int) -> void:
+	var meta: Dictionary = game.meta
+	var top := sling_rect(0).position.y
+	_t(Vector2(META_PLAYER.position.x + 30, top - 12), "Рогатка: сила и ветка на забег", 17)
+	var branch := Meta.sling_branch(meta)
+	for i in Meta.SLING.size():
+		var it: Dictionary = Meta.SLING[i]
+		var cr := sling_rect(i)
+		var soon: bool = it.get("soon", false)
+		var have := Meta.sling_owned(meta, it["key"])
+		var req_ok: bool = String(it["req"]) == "" or Meta.sling_owned(meta, it["req"])
+		var can: bool = not soon and not have and req_ok and feathers >= int(it["cost"])
+		var active: bool = have and branch == it["key"]
+		var hov: bool = cr.has_point(game.paw["pos"])
+		var fill := Color(1, 0.9, 0.6) if active else (Color(0.9, 0.97, 0.88) if have else (Color(1, 0.93, 0.7) if can and hov else (PANEL if not soon else Color(0.9, 0.88, 0.84))))
+		Art.card(self, cr, fill, Art.frame() + 20 + i, INK if not soon else Color(INK, 0.4), 3.0 if active else 1.8)
+		Icons.draw(self, it["icon"], cr.position + Vector2(cr.size.x * 0.5, 34), 44.0, 1.0 if have or can else 0.5)
+		Art.text_c(self, font, cr.position + Vector2(cr.size.x * 0.5, 76), String(it["name"]), 14, INK if not soon else Color(INK, 0.5))
+		var tag := ""
+		if soon:
+			tag = "скоро"
+		elif active:
+			tag = "ветка на забег"
+		elif have:
+			tag = "клик — выбрать" if it["branch"] else "куплено"
+		elif not req_ok:
+			tag = "нужна тугая резинка"
+		else:
+			tag = "%d перьев" % int(it["cost"])
+		Art.text_c(self, font, cr.position + Vector2(cr.size.x * 0.5, 98), tag, 13, Color("8a5a1e") if can or active else Color(INK, 0.6))
+		if hov and not soon:
+			draw_multiline_string(font, Vector2(META_PLAYER.position.x + 30, cr.end.y + 22), String(it["desc"]), HORIZONTAL_ALIGNMENT_LEFT, 860, 14, 2, Color(INK, 0.8))
+
+
+func sling_rect(i: int) -> Rect2:
+	var r := META_PLAYER
+	return Rect2(r.position.x + 30 + i * 174, r.position.y + 770, 164, 112)
 
 
 func unlock_rect(tier: int, i: int) -> Rect2:
 	var r := META_PLAYER
-	return Rect2(r.position.x + 30 + i * 440, r.position.y + 170 + tier * 250, 420, 130)
+	return Rect2(r.position.x + 30 + i * 440, r.position.y + 140 + tier * 170, 420, 120)
 
 
 ## Клики на экране меты: покупка исследования или новый забег.
@@ -722,6 +762,9 @@ func meta_click(p: Vector2) -> String:
 			if unlock_rect(tier, i).has_point(p):
 				return "buy:" + String(it["key"])
 			i += 1
+	for i in Meta.SLING.size():
+		if sling_rect(i).has_point(p):
+			return "sling:" + String(Meta.SLING[i]["key"])
 	return ""
 
 func _shares_list(p: Vector2, d: Dictionary, names: Dictionary, col: Color) -> void:
@@ -789,7 +832,7 @@ func _draw_paw(fr: int) -> void:
 		draw_line(anc - nrm, p, Color("8a5a3a"), 3.0, true)
 		var v: Vector2 = game.throw_vector()
 		if v != Vector2.ZERO:
-			var power: float = v.length() / game.SOCK_SPEED
+			var power: float = v.length() / game.sling_speed()
 			var end: Vector2 = anc + v.normalized() * (50.0 + 220.0 * power)
 			var col := Color(0.42, 0.31, 0.7).lerp(Color(0.9, 0.35, 0.1), power)
 			draw_dashed_line(anc, end, Color(col, 0.9), 3.0 + 3.0 * power, 10.0)

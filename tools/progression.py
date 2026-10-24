@@ -36,7 +36,7 @@ if __name__ == "__main__":
         unl = sum(len(r["unlocked"]) for r in rs) / len(rs)
         up = sum(sum(r["up"].values()) for r in rs) / len(rs)
         plans = sorted(set(p for r in rs for p in r["plan"]))
-        print(f"{i + 1:5d} | {wins}/{len(rs)} | {lvl:.1f} | {unl:.1f}/6 | {up:.1f} | {', '.join(plans)}")
+        print(f"{i + 1:5d} | {wins}/{len(rs)} | {lvl:.1f} | {unl:.1f}/10 | {up:.1f} | {', '.join(plans)}")
     skills = {}
     for s in all_series:
         for r in s:

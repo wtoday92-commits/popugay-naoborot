@@ -7,12 +7,16 @@ const M := 40.0
 const SCREEN := Vector2(1920, 1080)
 const FIELD := Rect2(340, 0, 1240, 1080)
 const RUN_LENGTH := 300.0
-const HORDE_STEP := 50.0
+const HORDE_STEP := 60.0
+const ENRAGE_AT := 360.0
 const BOSS_AT := 240.0
 const EVENT_SLOTS := [40.0, 95.0, 150.0, 200.0]
 const EVENT_WARN := 10.0
 const GLOW_NEED := 5
-const METEOR_CD := 10.0
+const METEOR_CD := 12.0
+const BASKET_DELAY := 2.0
+const BASKET_R := 1.4 * M
+const BASKET_TRAP := 2.0
 const METEOR_DELAY := 1.2
 const METEOR_R := 2.5 * M
 const WAVE_UNLOCK := 180.0
@@ -20,8 +24,8 @@ const BOOK_UNLOCK := 120.0
 const HOLD_TIME := 2.5
 const HELD_SPEED := 230.0
 const INTRO_TIME := 2.8
-const WAVE_CD := 35.0
-const RAM_UNLOCK := 20.0
+const WAVE_CD := 25.0
+const RAM_UNLOCK := 0.0
 const RAM_SPEED := 1500.0
 const MILLET_CD := 30.0
 const PAW_PUSH_R := 1.5 * M
@@ -31,7 +35,7 @@ const PAW_BRUISE := 4.0
 const PAW_BRUISED_SPEED := 380.0
 const GRAB_R := 28.0
 const THROW_CD := 3.0
-const MAX_ENEMIES := 170
+const MAX_ENEMIES := 160
 const MAX_GEMS := 400
 const CELL := 40.0
 const MENU_R := 64.0
@@ -46,15 +50,15 @@ const MENU_DESC := {
 
 const ENAMES := ["sock", "yarn", "slipper", "sprayer", "hand", "super", "dust", "box", "boss"]
 const EDEFS := [
-	{"name": "Носок", "hp": 10.0, "speed": 1.7, "dmg": 5.0, "r": 11.0, "push": 1.0, "xp": 1},
-	{"name": "Клубок", "hp": 6.0, "speed": 3.6, "dmg": 3.0, "r": 10.0, "push": 1.0, "xp": 1},
-	{"name": "Тапок", "hp": 45.0, "speed": 0.9, "dmg": 11.0, "r": 18.0, "push": 0.5, "xp": 3},
-	{"name": "Пульверизатор", "hp": 14.0, "speed": 1.3, "dmg": 5.0, "r": 12.0, "push": 1.0, "xp": 2},
-	{"name": "Рука", "hp": 150.0, "speed": 2.0, "dmg": 12.0, "r": 18.0, "push": 0.0, "xp": 0},
-	{"name": "Суперносок", "hp": 60.0, "speed": 2.0, "dmg": 9.0, "r": 15.0, "push": 0.6, "xp": 5},
-	{"name": "Пылевой зайчик", "hp": 8.0, "speed": 2.6, "dmg": 4.0, "r": 9.0, "push": 1.0, "xp": 1},
-	{"name": "Шкатулка", "hp": 70.0, "speed": 2.6, "dmg": 0.0, "r": 16.0, "push": 0.0, "xp": 0},
-	{"name": "Пылесос", "hp": 1700.0, "speed": 1.1, "dmg": 16.0, "r": 56.0, "push": 0.0, "xp": 0},
+	{"name": "Носок", "hp": 14.0, "speed": 1.6, "dmg": 5.0, "r": 11.0, "push": 1.0, "xp": 1},
+	{"name": "Клубок", "hp": 9.0, "speed": 3.4, "dmg": 4.0, "r": 10.0, "push": 1.0, "xp": 1},
+	{"name": "Тапок", "hp": 60.0, "speed": 0.9, "dmg": 12.0, "r": 18.0, "push": 0.5, "xp": 4},
+	{"name": "Пульверизатор", "hp": 20.0, "speed": 1.3, "dmg": 5.0, "r": 12.0, "push": 1.0, "xp": 2},
+	{"name": "Рука", "hp": 150.0, "speed": 2.0, "dmg": 8.0, "r": 18.0, "push": 0.0, "xp": 0},
+	{"name": "Суперносок", "hp": 70.0, "speed": 2.0, "dmg": 9.0, "r": 15.0, "push": 0.6, "xp": 5},
+	{"name": "Пылевой зайчик", "hp": 10.0, "speed": 2.6, "dmg": 4.0, "r": 9.0, "push": 1.0, "xp": 1},
+	{"name": "Шкатулка", "hp": 80.0, "speed": 2.6, "dmg": 0.0, "r": 16.0, "push": 0.0, "xp": 0},
+	{"name": "Пылесос", "hp": 1000.0, "speed": 1.1, "dmg": 13.0, "r": 56.0, "push": 0.0, "xp": 0},
 ]
 
 var floor_rect := Rect2(372, 34, 1176, 1012)
@@ -116,6 +120,16 @@ var first_run := true
 var dealt_by_src := {}
 var unlock_seen := {}
 var learn := false
+var meta := {}
+var events_total := 2
+var run_millet := 0
+var fruits_eaten := 0
+var enraged := false
+var meta_t := 0.0
+var unlock_all := false
+var mid_bot := false
+var prog := false
+var _bot_ram := 0.0
 var die_at := -1.0
 var shot_block := false
 var win_at := -1.0
@@ -186,6 +200,12 @@ func _ready() -> void:
 	selftest = args.has("--selftest")
 	learn = args.has("--learn")
 	full_bot = args.has("--fullbot")
+	unlock_all = args.has("--unlockall") or full_bot
+	mid_bot = args.has("--midbot")
+	prog = args.has("--prog")
+	if prog:
+		mid_bot = true
+		sim_bot = true
 	for a in args:
 		if a.begins_with("--shot="):
 			shot_at = float(a.substr(7))
@@ -195,10 +215,11 @@ func _ready() -> void:
 			die_at = float(a.substr(6))
 		if a.begins_with("--win="):
 			win_at = float(a.substr(6))
-	for f in furniture:
-		obstacles.append(f[0])
 	if sim:
 		Save.path = "user://save_sim.json"
+	for a in args:
+		if a.begins_with("--save="):
+			Save.path = "user://" + a.substr(7)
 	if shot_at > 0.0:
 		Save.path = "user://save_shot.json"
 	save = Save.defaults() if (sim and not learn) or shot_at > 0.0 else Save.load_data()
@@ -274,14 +295,30 @@ func start_run() -> void:
 	combo_cd = 0.0
 	hints_shown = {}
 	dmg_by_src = {}
+	meta = save.get("meta", Meta.defaults())
+	for k in Meta.defaults():
+		if not meta.has(k):
+			meta[k] = Meta.defaults()[k]
+	save["meta"] = meta
+	if unlock_all:
+		for it in Meta.PLAYER:
+			meta["unlocked"][it["key"]] = true
+	_generate_room()
 	queue.clear()
+	events_total = 2 + (1 if Meta.unlocked(meta, "event3") else 0) + (1 if Meta.unlocked(meta, "event4") else 0)
+	var slots: Array = [[70.0, 160.0], [50.0, 120.0, 190.0], [40.0, 95.0, 150.0, 200.0]][events_total - 2]
 	var types: Array = Skills.EVENTS.duplicate()
 	types.shuffle()
-	for i in EVENT_SLOTS.size():
-		queue.append({"type": types[i], "at": EVENT_SLOTS[i]})
+	for i in slots.size():
+		queue.append({"type": types[i], "at": slots[i]})
+	run_millet = 0
+	fruits_eaten = 0
+	enraged = false
+	meta_t = 0.0
 	paw["id"] = new_id()
 	hero = Hero.new(self)
-	hero.pos = Vector2(900, 660)
+	hero.apply_meta(meta["parrot"]["up"], meta.get("quests", []))
+	hero.pos = floor_rect.get_center()
 	if hud != null:
 		hud.reset()
 	throw_cd = 0.0
@@ -292,8 +329,7 @@ func start_run() -> void:
 	dealt_by_src = {}
 	unlock_seen = {}
 	first_run = int(save.get("runs", 0)) == 0 and not sim
-	if not sim or learn:
-		hero.learn(save.get("memory", {}))
+	hero.learn(save.get("memory", {}) if (not sim or learn) else {})
 	if sim:
 		phase = "play"
 	else:
@@ -302,7 +338,9 @@ func start_run() -> void:
 		intro_t = 0.0
 		hero.pos = Vector2(FIELD.position.x - 80, 120)
 	Engine.time_scale = game_speed
-	add_thought("Цели: выжить 5 минут, открыть 2 кормушки, пройти 3 ивента.")
+	add_thought("Цель: сломать пылесос, иначе отсюда не выбраться.")
+	for q in hero.quests:
+		add_thought("Квест: %s." % String(Meta.quest_by_key(q).get("name", q)).to_lower())
 	for note in hero.memory_notes:
 		add_thought(note)
 
@@ -328,7 +366,7 @@ func _process(delta: float) -> void:
 	if not sim:
 		world.queue_redraw()
 		hud.queue_redraw()
-	if shot_at > 0.0 and time > shot_at - 0.8 and meteor_cd <= 0.0 and time > BOOK_UNLOCK:
+	if shot_at > 0.0 and time > shot_at - 0.8 and meteor_cd <= 0.0 and ability_unlocked("book"):
 		paw["pos"] = hero.pos + Vector2(60, 20)
 		cast_meteor()
 	if die_at > 0.0 and time >= die_at and over == "":
@@ -395,34 +433,29 @@ func _step(delta: float) -> void:
 	if time >= _log_snap:
 		_log_snap += 10.0
 		log_event("СНИМОК", "здоровье %d/%d · ур. %d · врагов %d · стресс %.2f · режим %s · умения %s · пассивки %s · моды %s" % [int(hero.hp), int(hero.max_hp()), hero.level, enemies.size(), hero.stress, Hero.MODE_NAMES[hero.mode], str(hero.skills), str(hero.general), str(hero.mods.values())])
-	if time >= RUN_LENGTH and over == "":
-		over = "survived"
-		_write_log("герой выжил")
-		_begin_outro()
-		add_thought("Пять минут! Я выжил.")
-		sfx("fail")
+	if not enraged and boss != null and not boss.dead and time >= ENRAGE_AT:
+		# пылесос в ярости: дольше тянуть нельзя
+		enraged = true
+		boss.speed *= 1.6
+		boss.dmg *= 1.5
+		banner("Пылесос в ярости!", Color("b23a2e"), 38, 2.5)
+		sfx("boss", 0.0, 1.3)
 
 
 func _timed_hints() -> void:
 	var list := [
 		[0.5, "throw", "Рогатка: зажмите ЛКМ на носке, оттяните лапку назад и отпустите. Издалека носок разгорается и бьёт больнее."],
-		[RAM_UNLOCK, "ram", "Таран! Резко махните лапкой в попугая: он оглохнет на полсекунды."],
-		[BOOK_UNLOCK, "book", "Q — уронить книгу с полки туда, где лапка. Тень видна 1,2 с."],
-		[WAVE_UNLOCK, "wave", "W — опрокинуть корзину белья у стены, к которой ближе лапка."],
-		[EVENT_SLOTS[0] - 25.0, "queue", "Ивенты слева можно перетаскивать, пока они не начались."],
+		[12.0, "ram", "Таран: резко махните лапкой в попугая — он оглохнет на полсекунды."],
+		[float(queue[0]["at"]) - 25.0 if queue.size() > 0 else 40.0, "queue", "Ивенты слева можно поменять местами, пока они не начались."],
 	]
+	if ability_unlocked("book"):
+		list.append([20.0, "book", "Q — уронить книгу с полки туда, где лапка."])
+	if ability_unlocked("basket"):
+		list.append([30.0, "basket", "W — корзина-ловушка: тень растёт 2 с, потом корзина накрывает попугая."])
 	for h in list:
 		if time >= float(h[0]) and not hints_shown.has(h[1]):
 			hints_shown[h[1]] = true
 			show_hint(h[2], 7.0)
-			match h[1]:
-				"ram":
-					unlock_ability("ram")
-				"book":
-					unlock_ability("book")
-				"wave":
-					unlock_ability("basket")
-
 
 func _unhandled_input(event_in: InputEvent) -> void:
 	var mb := event_in as InputEventMouseButton
@@ -477,6 +510,13 @@ func _mouse_button(mb: InputEventMouseButton) -> void:
 	if mb.pressed and _try_block(p):
 		return
 	if mb.pressed and not outro.is_empty():
+		if bool(outro["done"]):
+			var act: String = hud.meta_click(p)
+			if act == "new":
+				start_run()
+			elif act.begins_with("buy:"):
+				buy_unlock(act.substr(4))
+			return
 		_outro_click(p)
 		return
 	if mb.pressed:
@@ -491,7 +531,7 @@ func _mouse_button(mb: InputEventMouseButton) -> void:
 		if not menu.is_empty():
 			_menu_click(p)
 			return
-		if millet_cd <= 0.0 and millet_unlocked:
+		if millet_cd <= 0.0 and millet_unlocked and ability_unlocked("millet"):
 			var g = _gem_at(p)
 			if g != null:
 				menu = {"gem": g, "t": 0.0}
@@ -833,7 +873,7 @@ func _update_missiles(delta: float) -> void:
 # ---------- кнопки игрока ----------
 
 func cast_meteor() -> void:
-	if over != "" or paused or meteor_cd > 0.0 or phase != "play" or time < BOOK_UNLOCK:
+	if over != "" or paused or meteor_cd > 0.0 or phase != "play" or not ability_unlocked("book"):
 		return
 	var p: Vector2 = paw["pos"]
 	if not sim and not FIELD.has_point(p):
@@ -847,43 +887,46 @@ func cast_meteor() -> void:
 	sfx("whoosh", -4.0)
 
 
+## Корзина-ловушка: под лапкой 2 с растёт тень, потом сверху падает корзина и накрывает того, кто под ней.
 func cast_wave() -> void:
-	if over != "" or paused or time < WAVE_UNLOCK or wave_cd > 0.0:
+	if over != "" or paused or phase != "play" or not ability_unlocked("basket") or wave_cd > 0.0:
+		return
+	var p: Vector2 = paw["pos"]
+	if not sim and not FIELD.has_point(p):
 		return
 	wave_cd = WAVE_CD
-	log_event("ИГРОК", "корзина белья")
-	var p: Vector2 = paw["pos"]
-	var f := floor_rect
-	var dl := p.x - f.position.x
-	var dr := f.end.x - p.x
-	var dtp := p.y - f.position.y
-	var db := f.end.y - p.y
-	var mn := minf(minf(dl, dr), minf(dtp, db))
-	var base: Vector2
-	var along: Vector2
-	if mn == dl:
-		base = Vector2(f.position.x + 24, clampf(p.y, f.position.y + 170, f.end.y - 170))
-		along = Vector2(0, 1)
-	elif mn == dr:
-		base = Vector2(f.end.x - 24, clampf(p.y, f.position.y + 170, f.end.y - 170))
-		along = Vector2(0, 1)
-	elif mn == dtp:
-		base = Vector2(clampf(p.x, f.position.x + 170, f.end.x - 170), f.position.y + 24)
-		along = Vector2(1, 0)
-	else:
-		base = Vector2(clampf(p.x, f.position.x + 170, f.end.x - 170), f.end.y - 24)
-		along = Vector2(1, 0)
-	for i in 10:
-		var q := resolve_circle(base + along * randf_range(-160.0, 160.0), 12.0)
-		if is_blocked(q):
-			q = edge_point(0.0)
-		spawn_enemy(Enemy.T.SLIPPER if i < 2 else Enemy.T.SOCK, q, true)
-	add_fx({"kind": "basket", "pos": base, "dur": 1.2})
-	banner("Корзина белья опрокинулась!", Color("6a4fb3"), 28, 1.8)
-	sfx("whoosh", 0.0, 0.7)
+	log_event("ИГРОК", "корзина-ловушка")
+	p = p.clamp(floor_rect.position, floor_rect.end)
+	meteors.append({"id": new_id(), "pos": p, "born": time, "t": 0.0, "delay": BASKET_DELAY, "r": BASKET_R,
+		"landed": false, "land_t": 0.0, "focus_t": -1.0, "notice_t": -1.0, "basket": true})
+	sfx("whoosh", -6.0, 0.6)
+
 
 
 # ---------- орда ----------
+
+## Волны по образцу Vampire Survivors: на каждом отрезке — минимум врагов на поле и интервал спавна.
+const WAVES := [
+	[0.0, 5, 1.8, 0.0, 0.0],
+	[30.0, 9, 1.3, 0.0, 0.0],
+	[60.0, 14, 1.0, 0.12, 0.0],
+	[90.0, 18, 0.9, 0.15, 0.0],
+	[120.0, 22, 0.8, 0.18, 0.04],
+	[150.0, 26, 0.7, 0.2, 0.05],
+	[180.0, 30, 0.65, 0.22, 0.05],
+	[210.0, 34, 0.6, 0.22, 0.06],
+	[240.0, 20, 0.9, 0.2, 0.04],
+	[300.0, 28, 0.7, 0.22, 0.06],
+]
+
+
+func _wave() -> Array:
+	var w: Array = WAVES[0]
+	for row in WAVES:
+		if time >= float(row[0]):
+			w = row
+	return w
+
 
 func _director(delta: float) -> void:
 	if time >= next_horde:
@@ -893,32 +936,40 @@ func _director(delta: float) -> void:
 		sfx("gong", -4.0)
 		for e in enemies:
 			e.blue = 0.8
-	var rate := (1.0 + time / 60.0 * 0.5) * (1.0 + 0.08 * float(horde_level - 1))
+	var w := _wave()
+	var minimum: int = w[1]
+	var interval: float = w[2]
 	if time < double_spawn_until:
-		rate *= 2.0
-	if boss != null and not boss.dead:
-		rate *= 0.6
-	spawn_acc += rate * delta
-	while spawn_acc >= 1.0:
-		spawn_acc -= 1.0
-		if enemies.size() >= MAX_ENEMIES:
-			continue
+		interval *= 0.5
+	if enraged:
+		interval *= 0.7
+	var alive := 0
+	for e in enemies:
+		if not e.is_big():
+			alive += 1
+	spawn_acc += delta
+	var burst := alive < minimum
+	while (spawn_acc >= interval or burst) and enemies.size() < MAX_ENEMIES:
+		if not burst:
+			spawn_acc -= interval
 		var t: int = Enemy.T.SOCK
 		var r := randf()
-		if time > 100.0 and r < 0.06:
+		if r < float(w[4]):
 			t = Enemy.T.SPRAYER
-		elif time > 60.0 and r < 0.26:
+		elif r < float(w[4]) + float(w[3]):
 			t = Enemy.T.SLIPPER
 		spawn_enemy(t, edge_point(9.0 * M))
+		alive += 1
+		burst = alive < minimum
 	if time >= next_swarm:
-		next_swarm = time + randf_range(25.0, 35.0)
+		next_swarm = time + randf_range(30.0, 40.0)
 		var p := edge_point(10.0 * M)
 		# звон слышен до появления: и герой, и игрок знают, откуда катится рой
 		add_fx({"kind": "jingle", "pos": p, "dur": 1.4})
 		sfx("jingle", -6.0)
-		pending.append({"at": time + 1.2, "type": Enemy.T.YARN, "n": 6 + horde_level, "pos": p})
+		pending.append({"at": time + 1.2, "type": Enemy.T.YARN, "n": 5 + horde_level, "pos": p})
 	if time >= next_hand and (boss == null or boss.dead):
-		next_hand = time + 60.0
+		next_hand = time + 75.0
 		var e := spawn_enemy(Enemy.T.HAND, edge_point(10.0 * M))
 		e.carries_chest = true
 		banner("Рука несёт кормушку", Color("b07a1e"), 26, 2.0)
@@ -940,8 +991,7 @@ func _director(delta: float) -> void:
 		banner("Робот-пылесос проснулся!", Color("b23a2e"), 40, 3.0)
 		sfx("boss")
 		shake = 10.0
-		add_thought("Это ещё что?! Пылесос!")
-
+		add_thought("Это ещё что?! Пылесос! Без него отсюда не выбраться.")
 
 func spawn_enemy(type: int, p: Vector2, from_player: bool = false) -> Enemy:
 	var d: Dictionary = EDEFS[type]
@@ -951,9 +1001,9 @@ func spawn_enemy(type: int, p: Vector2, from_player: bool = false) -> Enemy:
 	e.pos = p
 	e.born = time
 	var l := float(horde_level - 1)
-	var hp_k := 1.0 + 0.12 * l
+	var hp_k := 1.0 + 0.2 * l
 	if type == Enemy.T.BOSS or type == Enemy.T.BOX:
-		hp_k = 1.0 + 0.1 * float(hero.level)
+		hp_k = 1.0 + 0.05 * float(hero.level)
 	e.max_hp = float(d["hp"]) * hp_k
 	e.hp = e.max_hp
 	e.speed = float(d["speed"]) * M * (1.0 + 0.03 * l)
@@ -1111,7 +1161,7 @@ func _update_enemies(delta: float) -> void:
 					e.grab_t -= delta
 					if e.grab_t <= 0.0:
 						e.grab_state = 0
-						e.grab_cd = 2.5
+						e.grab_cd = 4.5
 						if d < 1.9 * M and hero.held <= 0.0 and e.stun <= 0.0:
 							hero.grabbed(e)
 							sfx("grab", 0.0, 0.6)
@@ -1285,7 +1335,7 @@ func _update_boss(e: Enemy, delta: float, d: float, dir: Vector2) -> float:
 			var nxt := e.pos + e.dash_dir * 14.0 * M * delta
 			var hit_wall := not floor_rect.grow(-e.radius - 2.0).has_point(nxt)
 			if e.pos.distance_to(hero.pos) < e.radius + hero.radius + 6.0 and hero.stun <= 0.0:
-				hero.take_damage(20.0 + 2.0 * horde_level, "boss", "Пылесос", false)
+				hero.take_damage(15.0 + horde_level, "boss", "Пылесос", false)
 				hero.knocked(e.dash_dir.rotated(PI * 0.5 * signf(randf() - 0.5)), 420.0, 0.35)
 				sfx("thud")
 				shake = 7.0
@@ -1413,6 +1463,10 @@ func _kill(e: Enemy) -> void:
 				_drop_gem(e.pos + Vector2(randf_range(-30, 30), randf_range(-30, 30)), i < 2)
 		Enemy.T.BOSS:
 			boss_defeated = true
+			if over == "":
+				over = "survived"
+				_write_log("герой сломал пылесос")
+				_begin_outro()
 			log_event("БОСС", "пылесос сломан")
 			banner("Пылесос сломан!", Color("4f8f3a"), 42, 3.0)
 			add_thought("Я сломал пылесос! Я легенда!")
@@ -1428,7 +1482,7 @@ func _kill(e: Enemy) -> void:
 func _drop_gem(p: Vector2, big: bool, glow: bool = false) -> Dictionary:
 	var g := {"id": new_id(), "pos": p, "big": big, "glow": glow, "xp": 5 if big else 1, "born": time, "taken": false}
 	gems.append(g)
-	if big and not glow and not millet_unlocked:
+	if big and not glow and not millet_unlocked and Meta.unlocked(meta, "millet"):
 		millet_unlocked = true
 		unlock_ability("millet")
 		if not sim and not bool(save.get("tut_millet", false)):
@@ -1498,12 +1552,15 @@ func _update_meteors(delta: float) -> void:
 				_meteor_land(m)
 		else:
 			m["land_t"] = float(m["land_t"]) + delta
-	meteors = meteors.filter(func(m): return not m["landed"] or float(m["land_t"]) < 0.9)
+	meteors = meteors.filter(func(m): return not m["landed"] or float(m["land_t"]) < (BASKET_TRAP + 0.3 if m.has("basket") else 0.9))
 
 
 func _meteor_land(m: Dictionary) -> void:
 	m["landed"] = true
 	m["land_t"] = 0.0
+	if m.has("basket"):
+		_basket_land(m)
+		return
 	shake = 9.0
 	sfx("thud")
 	var p: Vector2 = m["pos"]
@@ -1522,6 +1579,26 @@ func _meteor_land(m: Dictionary) -> void:
 			continue
 		e.stun = 1.0
 		e.push_vel += (e.pos - p).normalized() * 200.0 * e.push_factor
+
+
+func _basket_land(m: Dictionary) -> void:
+	shake = 6.0
+	sfx("thud", 0.0, 1.3)
+	var p: Vector2 = m["pos"]
+	if hero.pos.distance_to(p) <= BASKET_R:
+		m["caught"] = true
+		hero.trapped = BASKET_TRAP
+		hero.pos = p
+		tricks += 1
+		_register_hit("trap")
+		hero.say("Меня накрыли корзиной!")
+		log_event("ИГРОК", "корзина накрыла попугая")
+		add_text(p + Vector2(0, -60), "Попался в корзину!", Color("6a4fb3"), 24)
+	else:
+		hero.say("Мимо, корзинка.")
+	for e in enemies_near(p, BASKET_R, 999):
+		if not e.is_big():
+			e.stun = BASKET_TRAP
 
 
 func _update_delayed() -> void:
@@ -1564,6 +1641,7 @@ func on_gem_taken(g: Dictionary) -> void:
 				sfx("egg")
 		return
 	hero.xp += int(g["xp"])
+	run_millet += int(g["xp"])
 	if g["glow"] and not event.is_empty() and event["type"] == "glow":
 		event["got"] = int(event["got"]) + 1
 		sfx("chime", -6.0, 1.5)
@@ -1790,6 +1868,7 @@ func move_queue(from: int, to: int) -> void:
 # ---------- фрукты ----------
 
 func on_fruit_eaten(f: String) -> void:
+	fruits_eaten += 1
 	sfx("fruit")
 	add_fx({"kind": "eat", "pos": hero.pos, "dur": 0.6, "fruit": f})
 	match f:
@@ -1862,8 +1941,8 @@ func begin_levelup() -> void:
 			best = i
 	var first: bool = not bool(save.get("tut_block", false))
 	levelup = {"cards": cards, "scores": scored, "chosen": best, "t": 0.0, "applied": false, "level": hero.level,
-		"blocked": -1, "tut": first, "need_block": cards.size() > 1 and not sim, "wait": 0.0}
-	if sim and full_bot and cards.size() > 1:
+		"blocked": -1, "tut": first, "need_block": cards.size() > 1 and not sim and ability_unlocked("block"), "wait": 0.0}
+	if sim and (full_bot or prog) and cards.size() > 1 and ability_unlocked("block"):
 		_block_card(best)
 	hero.choosing = true
 	sfx("level", -4.0)
@@ -1872,8 +1951,8 @@ func begin_levelup() -> void:
 func _apply_time_scale() -> void:
 	var k := 1.0
 	if not levelup.is_empty() and (levelup_block_open() or float(levelup["t"]) < LU_SLOW):
-		# игра застывает, пока игрок запрещает умение и попугай выбирает
-		k = 0.001
+		# с запретом игра застывает, без него — только замедляется, пока попугай выбирает
+		k = 0.001 if bool(levelup["need_block"]) else 0.3
 	if not tut.is_empty():
 		k = 0.04
 	if over != "" or phase == "intro":
@@ -2106,10 +2185,10 @@ func _sim_step() -> void:
 		return
 	if selftest:
 		_selftest_step()
-	if sim_bot and over == "" and meteor_cd <= 0.0 and time > BOOK_UNLOCK:
+	if sim_bot and over == "" and meteor_cd <= 0.0 and ability_unlocked("book") and time > 5.0:
 		paw["pos"] = hero.pos + hero.vel * 0.8 + Vector2(randf_range(-30, 30), randf_range(-30, 30))
 		cast_meteor()
-	if full_bot and over == "":
+	if (full_bot or mid_bot) and over == "":
 		_full_bot()
 	if time >= _sim_report:
 		_sim_report += 30.0
@@ -2123,6 +2202,7 @@ func _sim_step() -> void:
 			"сломан" if boss_defeated else ("жив" if boss != null else "не появился"), hero.events_done, events_denied,
 			meteor_hits, meteors_cast, kills, hero.chests_opened])
 		print("УРОН ПО ГЕРОЮ: ", dmg_by_src)
+		print("ДАННЫЕ ", JSON.stringify({"over": over, "time": snappedf(time, 0.1), "level": hero.level, "boss_hp": (boss.hp / boss.max_hp if boss != null and not boss.dead else 0.0), "boss": boss_defeated, "skills": hero.skills, "mods": hero.mods.values(), "general": hero.general, "taken": dmg_by_src, "dealt": dealt_by_src, "events": hero.events_done, "events_total": events_total, "millet": run_millet, "feathers": save.get("feathers", 0), "up": meta["parrot"]["up"], "quests": hero.quests, "player_dmg": int(player_damage), "unlocked": meta["unlocked"].keys(), "plan": hero.plan}))
 		get_tree().quit()
 
 
@@ -2208,13 +2288,22 @@ func _write_log(result: String) -> void:
 ## «Сильный игрок» для прогонов: бросает носки, подменяет просо, опрокидывает корзину.
 func _full_bot() -> void:
 	_build_grid()
+	if mid_bot and time >= _bot_ram and time > 10.0:
+		# таран: средний игрок попадает не всегда, а попугай уворачивается, если смотрит на лапку
+		_bot_ram = time + randf_range(6.0, 10.0)
+		if randf() < 0.6 and hero.ram_immune <= 0.0:
+			paw_bruise = PAW_BRUISE
+			rams += 1
+			if hero.focus.size() < 3 or randf() < 0.5:
+				hero.rammed(Vector2.RIGHT.rotated(randf() * TAU))
 	if time >= _bot_throw:
-		_bot_throw = time + randf_range(2.0, 3.5)
+		_bot_throw = time + (randf_range(3.5, 6.0) if mid_bot else randf_range(2.0, 3.5))
 		for e in enemies_near(hero.pos, 7.0 * M, 20):
 			if e.grabbable() and e.pos.distance_to(hero.pos) > 3.0 * M and (e.type != Enemy.T.SLIPPER or hero.fruits.size() > 0):
 				_try_grab(e.pos)
 				if held_e != null:
-					var aim := hero.pos + hero.vel * 0.3 + Vector2(randf_range(-40, 40), randf_range(-40, 40))
+					var spread := 90.0 if mid_bot else 40.0
+					var aim := hero.pos + hero.vel * 0.3 + Vector2(randf_range(-spread, spread), randf_range(-spread, spread))
 					_release_grab((aim - held_e.pos).normalized() * 1200.0)
 				break
 	if millet_cd <= 0.0 and millet_unlocked:
@@ -2223,8 +2312,8 @@ func _full_bot() -> void:
 				g["mod"] = ["trap", "rotten", "egg"][randi() % 3]
 				millet_cd = MILLET_CD
 				break
-	if wave_cd <= 0.0 and time >= WAVE_UNLOCK:
-		paw["pos"] = hero.pos
+	if wave_cd <= 0.0 and ability_unlocked("basket") and (not mid_bot or prog):
+		paw["pos"] = hero.pos + hero.vel * 1.4
 		cast_wave()
 	if not millet_unlocked:
 		return
@@ -2238,23 +2327,22 @@ const ABILITY_ORDER := ["throw", "ram", "millet", "book", "basket"]
 
 func ability_unlocked(k: String) -> bool:
 	match k:
-		"throw":
+		"throw", "ram":
 			return true
-		"ram":
-			return time >= RAM_UNLOCK
 		"millet":
-			return millet_unlocked
-		"book":
-			return time >= BOOK_UNLOCK
-		"basket":
-			return time >= WAVE_UNLOCK
+			return Meta.unlocked(meta, "millet") and millet_unlocked
+		"book", "basket", "block":
+			return Meta.unlocked(meta, k)
 	return false
 
 
-## Когда кнопка открывается: в первом забеге она появляется с анимацией, потом видна серой заранее.
-func ability_visible(k: String) -> bool:
-	return not first_run or ability_unlocked(k)
 
+## Когда кнопка открывается: в первом забеге она появляется с анимацией, потом видна серой заранее.
+## Кнопки исследованных инструментов видны всегда; закрытые в мете — не показываются.
+func ability_visible(k: String) -> bool:
+	if k == "throw" or k == "ram":
+		return true
+	return Meta.unlocked(meta, k)
 
 func unlock_ability(k: String) -> void:
 	if unlock_seen.has(k):
@@ -2327,26 +2415,27 @@ func _begin_outro() -> void:
 	tut = {}
 	if not event.is_empty():
 		_end_event()
+	var player_won: bool = over == "hero_dead"
+	var feathers := Meta.feathers_for(player_damage, events_denied, player_won)
+	_save_run(feathers)
 	if sim:
-		_save_run()
 		return
-	outro = {"t": 0.0, "start": hero.pos, "items": [], "opened": false, "reward": [], "done": false}
-	var won: bool = over == "hero_dead"
-	if won:
+	outro = {"t": 0.0, "start": hero.pos, "items": [], "opened": false, "reward": [], "done": false, "feathers": feathers}
+	if player_won:
 		hero.hp = 1.0
 		outro["items"].append({"kind": "egg", "pos": hero.pos, "vel": Vector2(0, -60), "landed": false, "got": false})
 		hero.say("Аааа! Улетаю!")
 	else:
-		for i in 3:
-			outro["items"].append({"kind": "feather", "pos": hero.pos + Vector2(randf_range(-30, 30), 0), "vel": Vector2(randf_range(-40, 40), -40), "landed": false, "got": false, "sway": randf() * TAU})
-		hero.say("Пять минут! Я молодец, улетаю.")
-	_save_run()
-
+		for i in feathers:
+			outro["items"].append({"kind": "feather", "pos": hero.pos + Vector2(randf_range(-40, 40), 0), "vel": Vector2(randf_range(-40, 40), -40), "landed": false, "got": false, "sway": randf() * TAU})
+		hero.say("Пылесос сломан! Я свободен, улетаю.")
 
 func _update_outro(dt: float) -> void:
 	if outro.is_empty():
 		return
 	outro["t"] = float(outro["t"]) + dt
+	if bool(outro["done"]):
+		meta_t += dt
 	var t: float = outro["t"]
 	_update_fx(dt)
 	var won: bool = over == "hero_dead"
@@ -2385,10 +2474,11 @@ func _outro_click(p: Vector2) -> void:
 		if it["kind"] == "egg":
 			# награда всегда двойная: что-то попугаю, что-то игроку
 			var a: String = EGG_HERO[randi() % EGG_HERO.size()]
-			var b: String = EGG_PLAYER[randi() % EGG_PLAYER.size()]
+			var b := "+%d перьев" % int(outro["feathers"])
 			outro["reward"] = [a, b]
-			var add := 3 if b == "+3 пера" else (5 if b == "+5 перьев" else 0)
-			save["feathers"] = int(save.get("feathers", 0)) + add
+			save["feathers"] = int(save.get("feathers", 0)) + int(outro["feathers"])
+			if a == "мешок проса для прокачки":
+				meta["parrot"]["bank"] = int(meta["parrot"]["bank"]) + 300
 			var rw: Array = save.get("rewards", [])
 			rw.append({"hero": a, "player": b})
 			save["rewards"] = rw
@@ -2400,6 +2490,13 @@ func _outro_click(p: Vector2) -> void:
 			add_fx({"kind": "sparkle", "pos": it["pos"], "dur": 0.5})
 			sfx("pickup", -4.0, 0.8)
 		Save.store(save)
+	if not outro.is_empty() and not bool(outro["done"]):
+		var left := 0
+		for it in outro["items"]:
+			if not it["got"]:
+				left += 1
+		if left == 0:
+			meta_t = 0.0
 	var all := true
 	for it in outro["items"]:
 		if not it["got"]:
@@ -2408,7 +2505,8 @@ func _outro_click(p: Vector2) -> void:
 
 
 ## Итоги забега: память попугая учится на том, что его било и чем он бил.
-func _save_run() -> void:
+## Итоги забега: память попугая, его прокачка за просо, квесты, достижения, перья игрока.
+func _save_run(feathers: int) -> void:
 	if sim and not learn:
 		return
 	save["runs"] = int(save.get("runs", 0)) + 1
@@ -2421,6 +2519,15 @@ func _save_run() -> void:
 		var lv := maxi(1, hero.lvl_of(k)) if k != "peck" else 1
 		eff[k] = float(dealt_by_src[k]) / float(lv)
 	mem["dealt"] = Save.blend(mem.get("dealt", {}), Save.shares(eff))
+	# сколько раз брал каждое умение и чем кончилось — чтобы не зациклиться на одном
+	var picks: Dictionary = mem.get("picks", {})
+	var wins: Dictionary = mem.get("wins", {})
+	for k in hero.skills:
+		picks[k] = int(picks.get(k, 0)) + 1
+		if boss_defeated:
+			wins[k] = int(wins.get(k, 0)) + 1
+	mem["picks"] = picks
+	mem["wins"] = wins
 	if over == "hero_dead":
 		var top := ""
 		var tv := 0.0
@@ -2432,4 +2539,144 @@ func _save_run() -> void:
 		deaths[top] = int(deaths.get(top, 0)) + 1
 		mem["deaths"] = deaths
 	save["memory"] = mem
+	# итоги для квестов и достижений
+	var r := {
+		"boss": boss_defeated, "time": time, "hp_frac": hero.hp_frac(), "chests": hero.chests_opened,
+		"events": hero.events_done, "events_total": events_total, "kills": kills, "millet": run_millet,
+		"throw_dmg": float(dmg_by_src.get("throw", 0)), "fruits": fruits_eaten, "level": hero.level, "rams": rams,
+	}
+	var st: Dictionary = meta["stats"]
+	st["kills"] = int(st.get("kills", 0)) + kills
+	st["boss_kills"] = int(st.get("boss_kills", 0)) + (1 if boss_defeated else 0)
+	st["events"] = int(st.get("events", 0)) + hero.events_done
+	st["chests"] = int(st.get("chests", 0)) + hero.chests_opened
+	st["millet"] = int(st.get("millet", 0)) + run_millet
+	var last := {"won": boss_defeated, "millet": run_millet, "quest_results": [], "bought": [], "offer": [], "picked": [], "feathers": feathers}
+	var bank := run_millet
+	for q in hero.quests:
+		var ok := Meta.quest_done(q, r)
+		last["quest_results"].append([q, ok])
+		if ok:
+			bank += int(Meta.quest_by_key(q)["reward"])
+	meta["parrot"]["bank"] = int(meta["parrot"]["bank"]) + bank
+	last["bought"] = Meta.parrot_shop(meta, mem)
+	var pool: Array = []
+	for q in Meta.QUESTS:
+		pool.append(q["key"])
+	pool.shuffle()
+	last["offer"] = pool.slice(0, 6)
+	last["picked"] = Meta.choose_quests(last["offer"], hero.greed0, mem)
+	meta["quests"] = last["picked"]
+	meta["last"] = last
+	if sim:
+		# в прогоне прогрессии игрок получает перья сразу и покупает самое дешёвое доступное
+		save["feathers"] = int(save.get("feathers", 0)) + feathers
+		var again := true
+		while again:
+			again = false
+			for it in Meta.PLAYER:
+				if not Meta.unlocked(meta, it["key"]) and Meta.tier_open(meta, int(it["tier"])) and int(save["feathers"]) >= int(it["cost"]):
+					save["feathers"] = int(save["feathers"]) - int(it["cost"])
+					meta["unlocked"][it["key"]] = true
+					again = true
+					break
+	save["meta"] = meta
 	Save.store(save)
+
+
+## Покупка исследования игрока за перья (экран после забега).
+func buy_unlock(key: String) -> bool:
+	for it in Meta.PLAYER:
+		if it["key"] != key or Meta.unlocked(meta, key) or not Meta.tier_open(meta, int(it["tier"])):
+			continue
+		if int(save.get("feathers", 0)) < int(it["cost"]):
+			sfx("fail", -8.0, 1.4)
+			return false
+		save["feathers"] = int(save["feathers"]) - int(it["cost"])
+		meta["unlocked"][key] = true
+		save["meta"] = meta
+		Save.store(save)
+		sfx("level", -4.0)
+		return true
+	return false
+
+
+
+# ---------- комната: каждый забег немного другая ----------
+
+const FURN_TEMPLATES := [
+	["sofa", Vector2(300, 110), 34.0, "wall"], ["shelf", Vector2(90, 300), 60.0, "side"], ["table", Vector2(180, 110), 26.0, "free"],
+	["armchair", Vector2(150, 140), 38.0, "any"], ["plant", Vector2(70, 70), 50.0, "any"], ["stool", Vector2(64, 64), 30.0, "free"],
+	["boxes", Vector2(120, 100), 50.0, "any"], ["lamp", Vector2(54, 54), 80.0, "free"], ["books", Vector2(80, 60), 26.0, "any"],
+	["toys", Vector2(110, 90), 32.0, "any"], ["nightstand", Vector2(108, 120), 40.0, "wall"], ["catbed", Vector2(160, 110), 20.0, "wall"],
+	["chair", Vector2(90, 90), 44.0, "free"],
+]
+## Минимальный проход между мебелью и до стен: шире, чем нужно, чтобы толпа не застревала
+## и у попугая не было узких «коридоров», где он косит орду.
+const ROOM_GAP := 150.0
+
+
+func _generate_room() -> void:
+	furniture = []
+	obstacles.clear()
+	var f := floor_rect
+	var center := f.get_center()
+	var temps: Array = FURN_TEMPLATES.duplicate()
+	temps.shuffle()
+	var want := randi_range(9, 12)
+	# полка с книгами всегда есть: оттуда падают книги
+	temps.sort_custom(func(a, b): return a[0] == "shelf" and b[0] != "shelf")
+	for t in temps:
+		if furniture.size() >= want:
+			break
+		var size: Vector2 = t[1]
+		var place: String = t[3]
+		for attempt in 40:
+			var r := Rect2()
+			var side := randi() % 4
+			if place == "side":
+				side = 2 + randi() % 2
+			if place == "free" or (place == "any" and randf() < 0.5):
+				r = Rect2(Vector2(randf_range(f.position.x + ROOM_GAP, f.end.x - ROOM_GAP - size.x), randf_range(f.position.y + ROOM_GAP, f.end.y - ROOM_GAP - size.y)), size)
+			else:
+				var sz := size if side < 2 else Vector2(size.y, size.x) if place != "side" else size
+				match side:
+					0:
+						r = Rect2(Vector2(randf_range(f.position.x, f.end.x - sz.x), f.position.y), sz)
+					1:
+						r = Rect2(Vector2(randf_range(f.position.x, f.end.x - sz.x), f.end.y - sz.y), sz)
+					2:
+						r = Rect2(Vector2(f.position.x, randf_range(f.position.y, f.end.y - sz.y)), sz)
+					_:
+						r = Rect2(Vector2(f.end.x - sz.x, randf_range(f.position.y, f.end.y - sz.y)), sz)
+			if _room_ok(r, center):
+				furniture.append([r, t[0], t[2]])
+				obstacles.append(r)
+				break
+	rug_pos = center + Vector2(randf_range(-160, 160), randf_range(-120, 120))
+
+
+var rug_pos := Vector2(880, 660)
+
+
+## Мебель не ставим впритык: до другой мебели и до стены — либо вплотную к стене, либо широкий проход.
+func _room_ok(r: Rect2, center: Vector2) -> bool:
+	var f := floor_rect
+	if not f.encloses(r):
+		return false
+	if r.grow(140.0).has_point(center):
+		return false
+	for o in obstacles:
+		if _rect_gap(r, o) < ROOM_GAP:
+			return false
+	var gaps := [r.position.x - f.position.x, f.end.x - r.end.x, r.position.y - f.position.y, f.end.y - r.end.y]
+	for g in gaps:
+		if g > 0.5 and g < ROOM_GAP:
+			return false
+	return true
+
+
+static func _rect_gap(a: Rect2, b: Rect2) -> float:
+	var dx := maxf(0.0, maxf(a.position.x - b.end.x, b.position.x - a.end.x))
+	var dy := maxf(0.0, maxf(a.position.y - b.end.y, b.position.y - a.end.y))
+	return sqrt(dx * dx + dy * dy)

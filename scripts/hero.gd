@@ -8,7 +8,6 @@ enum Mode { FARM, GOAL, HUNT, EVENT, RETREAT, PANIC }
 const MODE_NAMES := ["фарм", "к цели", "охота", "ивент", "отход", "ПАНИКА"]
 const M := 40.0
 const NDIR := 16
-const SLOTS := 3
 const VIEW := 12.0 * M
 
 # Характер первого героя: «упрямый коллекционер».
@@ -17,7 +16,12 @@ var stubborn := 0.7
 var caution := 0.4
 var curiosity := 0.5
 var perfection := 0.6
-var plan: Array[String] = ["bell", "fluff", "bell_wide"]
+var plan: Array[String] = []
+var slots := 3
+var quests: Array = []
+var meta_up := {}
+var learned_picks := {}
+var learned_wins := {}
 
 var game
 var pos := Vector2.ZERO
@@ -32,7 +36,7 @@ var radius := 18.0
 var hp := 100.0
 var level := 1
 var xp := 0
-var xp_next := 6
+var xp_next := 4
 var stress := 0.0
 var greed := 0.55
 var mode: int = Mode.FARM
@@ -126,7 +130,10 @@ func learn(mem: Dictionary) -> void:
 	learned_runs = int(mem.get("runs", 0))
 	learned_taken = mem.get("taken", {})
 	learned_dealt = mem.get("dealt", {})
+	learned_picks = mem.get("picks", {})
+	learned_wins = mem.get("wins", {})
 	memory_notes.clear()
+	plan = [_choose_plan()]
 	if learned_runs <= 0:
 		return
 	var trick := float(learned_taken.get("rotten", 0.0)) + float(learned_taken.get("trap", 0.0)) + float(learned_taken.get("missile", 0.0))
@@ -142,6 +149,52 @@ func learn(mem: Dictionary) -> void:
 		memory_notes.append("Лучше всего у меня шли %s. Возьму снова, если выпадет." % String(Skills.NAMES.get(best[0], best[0])))
 	if trick > 0.08:
 		memory_notes.append("Крупному просу больше не доверяю.")
+
+
+## План на забег: одно умение-цель. Удачные в прошлом весят больше, но редко пробованные
+## получают бонус за новизну — попугай не зацикливается на одном «лучшем» умении.
+func _choose_plan() -> String:
+	var best := ""
+	var bs := -INF
+	# иногда пробует что-то наугад: исследование важнее привычки
+	if randf() < 0.25:
+		return Skills.SKILLS[randi() % Skills.SKILLS.size()]
+	for k in Skills.SKILLS:
+		var sc := _learned_bonus(k) + randf_range(0.0, 2.0)
+		if sc > bs:
+			bs = sc
+			best = k
+	return best
+
+
+## Опыт прошлых забегов для умения: эффективность урона, доля побед и бонус за новизну.
+func _learned_bonus(k: String) -> float:
+	if learned_runs <= 0:
+		return 0.0
+	var b := 0.0
+	var vals: Array = []
+	for sk in Skills.SKILLS:
+		if learned_dealt.has(sk):
+			vals.append(float(learned_dealt[sk]))
+	if learned_dealt.has(k) and vals.size() > 1:
+		var mean := 0.0
+		for v in vals:
+			mean += float(v)
+		mean /= float(vals.size())
+		b += clampf((float(learned_dealt[k]) - mean) * 8.0, -1.2, 1.2)
+	var picks := int(learned_picks.get(k, 0))
+	if picks >= 2:
+		var wr := float(learned_wins.get(k, 0)) / float(picks)
+		var total_w := 0.0
+		var total_p := 0.0
+		for sk in learned_picks:
+			total_p += float(learned_picks[sk])
+			total_w += float(learned_wins.get(sk, 0))
+		b += clampf((wr - total_w / maxf(total_p, 1.0)) * 3.0, -1.0, 1.0)
+	# новизна: чем реже пробовал, тем интереснее попробовать снова
+	var share := float(picks) / maxf(1.0, float(learned_runs))
+	b += 1.6 * clampf(1.0 - share * 2.5, 0.0, 1.0)
+	return b
 
 
 static func _top_keys(d: Dictionary, n: int) -> Array:
@@ -168,15 +221,15 @@ func has_mod(k: String) -> bool:
 
 
 func max_hp() -> float:
-	return 120.0 + 20.0 * lvl_of("fluff")
+	return 100.0 + 15.0 * int(meta_up.get("hp", 0)) + 20.0 * lvl_of("fluff")
 
 
 func speed() -> float:
-	return 3.2 * M * (1.0 + 0.12 * lvl_of("wings")) * (1.5 if speed_t > 0.0 else 1.0)
+	return 3.0 * M * (1.0 + 0.05 * int(meta_up.get("speed", 0)) + 0.1 * lvl_of("wings")) * (1.5 if speed_t > 0.0 else 1.0)
 
 
 func dmg_mult() -> float:
-	var m := 1.0 + 0.12 * lvl_of("beak")
+	var m := 1.0 + 0.1 * int(meta_up.get("dmg", 0)) + 0.1 * lvl_of("beak")
 	if randf() < 0.08 * lvl_of("luck"):
 		m *= 2.0
 	return m
@@ -187,7 +240,7 @@ func armor() -> float:
 
 
 func magnet() -> float:
-	return 1.6 * M * (1.0 + 0.35 * lvl_of("magnet"))
+	return 1.6 * M * (1.0 + 0.15 * int(meta_up.get("magnet", 0)) + 0.3 * lvl_of("magnet"))
 
 
 func hp_frac() -> float:
@@ -256,7 +309,7 @@ func update(delta: float) -> void:
 	speed_t = maxf(0.0, speed_t - delta)
 	fruit_cd = maxf(0.0, fruit_cd - delta)
 	eat_t = maxf(0.0, eat_t - delta)
-	hp = minf(max_hp(), hp + 0.9 * delta)
+	hp = minf(max_hp(), hp + 0.5 * delta)
 	for k in wariness:
 		wariness[k] = maxf(0.0, float(wariness[k]) - 0.01 * delta)
 	waltz_t -= delta
@@ -368,7 +421,7 @@ func _attention() -> void:
 		nf.append(target)
 		ids.append(oid(target))
 	for c in cands:
-		if nf.size() >= SLOTS:
+		if nf.size() >= slots:
 			break
 		var cid: int = c["id"]
 		if ids.has(cid):
@@ -1029,10 +1082,10 @@ func _weapons(delta: float) -> void:
 			var e: Enemy = ts[0]
 			peck_dir = (e.pos - pos).normalized()
 			peck_t = 0.18
-			game.damage_enemy(e, 11.0 * dmg_mult(), peck_dir * 140.0, true, "peck")
+			game.damage_enemy(e, 10.0 * dmg_mult(), peck_dir * 140.0, true, "peck")
 			game.add_fx({"kind": "peck", "pos": pos, "to": e.pos, "dur": 0.2})
 			game.sfx("peck", -6.0, randf_range(0.9, 1.15))
-			cds["peck"] = 0.42
+			cds["peck"] = 0.45
 	for k in skills.keys():
 		var cd: float = float(cds.get(k, 0.0)) - delta
 		cds[k] = cd
@@ -1052,7 +1105,7 @@ func _weapons(delta: float) -> void:
 				var base: Vector2 = (ts[0].pos - pos).normalized()
 				for j in count:
 					var dir := base.rotated((float(j) - float(count - 1) * 0.5) * 0.2)
-					game.shots.append({"pos": pos, "vel": dir * 9.0 * M, "dmg": (7.0 + 3.0 * lvl) * dmg_mult(),
+					game.shots.append({"pos": pos, "vel": dir * 9.0 * M, "dmg": (6.0 + 3.0 * lvl) * dmg_mult(),
 						"pierce": 1 + int(lvl / 2) + (3 if has_mod("feather_pierce") else 0),
 						"life": 2.4 if has_mod("feather_bounce") else 1.2, "hit": [],
 						"bounce": 3 if has_mod("feather_bounce") else 0, "homing": has_mod("feather_homing"), "ice": has_mod("feather_ice")})
@@ -1067,7 +1120,7 @@ func _weapons(delta: float) -> void:
 						kb = (e.pos - pos).normalized() * 240.0
 					elif has_mod("bell_pull"):
 						kb = (pos - e.pos).normalized() * 60.0
-					game.damage_enemy(e, (2.0 + 1.5 * lvl) * dmg_mult(), kb, true, "bell")
+					game.damage_enemy(e, (2.0 + 1.2 * lvl) * dmg_mult(), kb, true, "bell")
 					if has_mod("bell_stun") and tick % 6 == 0:
 						e.stun = maxf(e.stun, 0.4)
 				if has_mod("bell_pull"):
@@ -1085,7 +1138,7 @@ func _weapons(delta: float) -> void:
 					continue
 				var e0: Enemy = ts[randi() % ts.size()]
 				var dir: Vector2 = (e0.pos - pos).normalized()
-				var dmg := (12.0 + 6.0 * lvl) * dmg_mult()
+				var dmg := (10.0 + 5.0 * lvl) * dmg_mult()
 				_beam(pos, dir, dmg)
 				if has_mod("mirror_double"):
 					_beam(pos, -dir, dmg)
@@ -1096,7 +1149,7 @@ func _weapons(delta: float) -> void:
 				if ts.size() < 4:
 					cds[k] = 0.3
 					continue
-				_scream(rr, (8.0 + 5.0 * lvl) * dmg_mult())
+				_scream(rr, (8.0 + 4.0 * lvl) * dmg_mult())
 				if has_mod("scream_echo"):
 					game.delayed.append({"at": game.time + 0.5, "kind": "echo", "r": rr, "dmg": (8.0 + 5.0 * lvl) * 0.7})
 				cds[k] = (5.0 - 0.5 * lvl) * (0.65 if has_mod("scream_fast") else 1.0)
@@ -1168,7 +1221,7 @@ func _orbit(delta: float, lvl: int) -> void:
 				continue
 			e.orbit_cd = 0.5
 			var kb: Vector2 = (e.pos - pos).normalized() * (320.0 if has_mod("orbit_knock") else 90.0)
-			game.damage_enemy(e, (6.0 + 3.0 * lvl) * dmg_mult(), kb, true, "orbit")
+			game.damage_enemy(e, (5.0 + 2.5 * lvl) * dmg_mult(), kb, true, "orbit")
 			if has_mod("orbit_fire"):
 				e.burn = 2.0
 				e.burn_dps = 3.0 + lvl
@@ -1270,7 +1323,7 @@ func try_dodge_throw(id: int, v: Vector2) -> bool:
 
 
 func grabbed(e: Enemy) -> void:
-	held = 1.0
+	held = 0.7
 	opening = 0.0
 	opening_chest = null
 	take_damage(e.dmg, "hand", "Рука", e.from_player)
@@ -1333,11 +1386,11 @@ func score_card(card: Dictionary) -> Dictionary:
 	s += best_r
 	if best_r > 1.5:
 		reason = best_txt
-	if card["kind"] == "skill" and learned_dealt.has(k):
-		# умение хорошо заходило в прошлых забегах
-		s += 3.0 * float(learned_dealt[k])
-		if float(learned_dealt[k]) > 0.25 and reason == "сильная карта":
-			reason = "оно у меня хорошо работает"
+	if card["kind"] == "skill" and learned_runs > 0:
+		var lb := _learned_bonus(k)
+		s += lb
+		if lb > 1.0 and reason == "сильная карта":
+			reason = "по опыту прошлых забегов"
 	if card["kind"] == "skill":
 		# урон решает выживание: умения ценятся выше пассивок, особенно пока их мало
 		if card["new"]:
@@ -1348,10 +1401,21 @@ func score_card(card: Dictionary) -> Dictionary:
 	return {"score": s, "reason": reason}
 
 
+## Прокачка из меты и квесты на забег.
+func apply_meta(ups: Dictionary, qs: Array) -> void:
+	meta_up = ups
+	quests = qs.duplicate()
+	slots = 3 + int(ups.get("eye", 0))
+	hp = max_hp()
+	var start := int(ups.get("start", 0))
+	for i in start:
+		xp += xp_next + 10 * i
+
+
 func consume_level() -> void:
 	xp = maxi(0, xp - xp_next)
 	level += 1
-	xp_next = int(5.0 + level * 2.0 + 0.15 * level * level)
+	xp_next = 6 * level - 2
 
 
 func apply_card(card: Dictionary) -> void:

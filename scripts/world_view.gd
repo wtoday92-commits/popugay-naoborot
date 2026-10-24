@@ -151,8 +151,8 @@ func _draw_room(fr: int) -> void:
 		y += 48.0
 		row += 1
 	# ковёр плоский: тонкая линия, без объёма
-	Art.blob(self, Vector2(880, 660), 250, 150, Color("eddcea"), 1.5, 7, 0.0, Color("cdb6cc"), 0.02)
-	Art.blob(self, Vector2(880, 660), 195, 108, Color("f3e6f0"), 1.0, 9, 0.0, Color("dcc8da"), 0.02)
+	Art.blob(self, game.rug_pos, 250, 150, Color("eddcea"), 1.5, 7, 0.0, Color("cdb6cc"), 0.02)
+	Art.blob(self, game.rug_pos, 195, 108, Color("f3e6f0"), 1.0, 9, 0.0, Color("dcc8da"), 0.02)
 	Art.outline(self, Art.wobbly_rect(f, fr, 1.0), INK, 3.5)
 	# плинтус
 	draw_rect(Rect2(f.position.x, f.position.y, f.size.x, 6), Color("b7a283"))
@@ -932,6 +932,9 @@ func _draw_levelup(fr: int) -> void:
 func _draw_shadow(m: Dictionary) -> void:
 	var p: Vector2 = m["pos"]
 	var r: float = m["r"]
+	if m.has("basket"):
+		_draw_basket(m)
+		return
 	if not m["landed"]:
 		var k := clampf(float(m["t"]) / float(m["delay"]), 0.0, 1.0)
 		Art.fill_blob(self, p, r * (0.35 + 0.65 * k), r * (0.35 + 0.65 * k) * 0.92, Color(0.18, 0.12, 0.09, 0.10 + 0.25 * k))
@@ -946,7 +949,7 @@ func _draw_shadow(m: Dictionary) -> void:
 
 
 func _draw_book(m: Dictionary, fr: int) -> void:
-	if m["landed"]:
+	if m["landed"] or m.has("basket"):
 		return
 	var k := clampf(float(m["t"]) / float(m["delay"]), 0.0, 1.0)
 	if k < 0.55:
@@ -1175,3 +1178,37 @@ func _card_tip(c: Dictionary, sc: Dictionary, cp: Vector2) -> void:
 	draw_string(font, r.position + Vector2(14, 50), lines[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.3, 0.3, 0.45))
 	draw_string(font, r.position + Vector2(14, 72), lines[2], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, INK)
 	draw_string(font, r.position + Vector2(14, 94), lines[3], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color(0.31, 0.47, 0.66))
+
+
+
+## Корзина-ловушка: тень медленно растёт, корзина падает сверху и держит попугая под собой.
+func _draw_basket(m: Dictionary) -> void:
+	var p: Vector2 = m["pos"]
+	var r: float = m["r"]
+	if not m["landed"]:
+		var k := clampf(float(m["t"]) / float(m["delay"]), 0.0, 1.0)
+		Art.fill_blob(self, p, r * (0.3 + 0.7 * k), r * (0.3 + 0.7 * k) * 0.9, Color(0.25, 0.18, 0.1, 0.12 + 0.28 * k))
+		draw_arc(p, r, 0, TAU, 40, Color(0.42, 0.31, 0.7, 0.6), 2.0, true)
+		if k > 0.7:
+			var kk := (k - 0.7) / 0.3
+			_basket_shape(p - Vector2(0, pow(1.0 - kk, 2.0) * 380.0), r * (1.3 - 0.3 * kk), 1.0)
+		return
+	var lt: float = m["land_t"]
+	var a := 1.0 - clampf((lt - game.BASKET_TRAP) / 0.3, 0.0, 1.0)
+	var bounce := absf(sin(lt * 18.0)) * 6.0 * maxf(0.0, 1.0 - lt * 2.0)
+	_basket_shape(p - Vector2(0, bounce), r, a)
+	if m.has("caught") and lt < game.BASKET_TRAP:
+		var left: float = 1.0 - lt / game.BASKET_TRAP
+		draw_arc(p, r + 10, -PI * 0.5, -PI * 0.5 + TAU * left, 32, Color(0.42, 0.31, 0.7, 0.9), 4.0, true)
+
+
+func _basket_shape(c: Vector2, r: float, a: float) -> void:
+	var body := PackedVector2Array([c + Vector2(-r, 0), c + Vector2(-r * 0.8, -r * 1.1), c + Vector2(r * 0.8, -r * 1.1), c + Vector2(r, 0)])
+	draw_colored_polygon(body, Color(0.85, 0.72, 0.5, 0.85 * a))
+	for i in 7:
+		var x := -r * 0.85 + i * r * 0.28
+		draw_line(c + Vector2(x, -2), c + Vector2(x * 0.82, -r * 1.08), Color(0.55, 0.42, 0.25, a), 2.5)
+	for j in 3:
+		var yy := -r * (0.25 + 0.3 * j)
+		draw_line(c + Vector2(-r * (1.0 - 0.07 * j), yy), c + Vector2(r * (1.0 - 0.07 * j), yy), Color(0.55, 0.42, 0.25, a), 2.0)
+	Art.outline(self, body, Color(INK, a), 3.0)

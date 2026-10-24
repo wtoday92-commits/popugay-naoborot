@@ -2,10 +2,10 @@ class_name Hero
 extends RefCounted
 ## ИИ попугая по ГДД, часть 2: три слота внимания, поля опасности и интереса,
 ## режимы с инерцией (2 раза в секунду), контекстное руление по 16 лучам (30 раз в секунду),
-## жадность, страх, выбор перков с ответом на действия игрока.
+## жадность и страх, ивенты, фрукты, выбор умений с ответом на действия игрока.
 
-enum Mode { FARM, GOAL, HUNT, RETREAT, PANIC }
-const MODE_NAMES := ["фарм", "к цели", "охота", "отход", "ПАНИКА"]
+enum Mode { FARM, GOAL, HUNT, EVENT, RETREAT, PANIC }
+const MODE_NAMES := ["фарм", "к цели", "охота", "ивент", "отход", "ПАНИКА"]
 const M := 40.0
 const NDIR := 16
 const SLOTS := 3
@@ -17,7 +17,7 @@ var stubborn := 0.7
 var caution := 0.4
 var curiosity := 0.5
 var perfection := 0.6
-var plan: Array[String] = ["bell", "fluff"]
+var plan: Array[String] = ["bell", "fluff", "bell_wide"]
 
 var game
 var pos := Vector2.ZERO
@@ -25,6 +25,7 @@ var heading := Vector2.RIGHT
 var desired := Vector2.RIGHT
 var vel := Vector2.ZERO
 var knock_vel := Vector2.ZERO
+var pull_vel := Vector2.ZERO
 var dodge_vel := Vector2.ZERO
 var dodge_t := 0.0
 var radius := 18.0
@@ -46,6 +47,7 @@ var near: Array[Enemy] = []
 var nearest_d := 99999.0
 var choosing := false
 var stun := 0.0
+var trapped := 0.0
 var held := 0.0
 var ram_immune := 0.0
 var hurt := 0.0
@@ -60,24 +62,34 @@ var think_now := false
 var spike_cd := 0.0
 var panic_exit_t := -10.0
 var waltz_dir := 1.0
-var waltz_t := 30.0
+var waltz_t := 25.0
 var wander := Vector2.ZERO
 var wander_t := 0.0
 var stuck_t := 0.0
 var stuck_ref := Vector2.ZERO
 var unstick_t := 0.0
 var unstick_dir := Vector2.ZERO
-var weapons := {"peck": 1}
-var passives := {}
+var skills := {}
+var general := {}
+var mods := {}
 var cds := {}
+var orbit_angle := 0.0
+var peck_t := 0.0
+var peck_dir := Vector2.RIGHT
+var fruits: Array[String] = []
+var fruit_cd := 0.0
+var speed_t := 0.0
+var shield_hits := 0
+var eat_t := 0.0
 var dmg_log: Array = []
-var wariness := {"paw": 0.0, "meteor": 0.0}
+var wariness := {"paw": 0.0, "meteor": 0.0, "millet": 0.0}
 var closedness := 0.0
 var danger_here := 0.0
 var horde_center := Vector2.ZERO
 var horde_count := 0
 var horde_obj := {"id": -1, "pos": Vector2.ZERO, "born": -10.0}
 var chests_opened := 0
+var events_done := 0
 var bob := 0.0
 var dirs: Array[Vector2] = []
 var dbg_D := PackedFloat32Array()
@@ -98,9 +110,13 @@ func _init(g) -> void:
 # ---------- характеристики ----------
 
 func lvl_of(k: String) -> int:
-	if weapons.has(k):
-		return int(weapons[k])
-	return int(passives.get(k, 0))
+	if skills.has(k):
+		return int(skills[k])
+	return int(general.get(k, 0))
+
+
+func has_mod(k: String) -> bool:
+	return mods.values().has(k)
 
 
 func max_hp() -> float:
@@ -108,11 +124,14 @@ func max_hp() -> float:
 
 
 func speed() -> float:
-	return 3.2 * M * (1.0 + 0.12 * lvl_of("wings"))
+	return 3.2 * M * (1.0 + 0.12 * lvl_of("wings")) * (1.5 if speed_t > 0.0 else 1.0)
 
 
 func dmg_mult() -> float:
-	return 1.0 + 0.12 * lvl_of("beak")
+	var m := 1.0 + 0.12 * lvl_of("beak")
+	if randf() < 0.08 * lvl_of("luck"):
+		m *= 2.0
+	return m
 
 
 func armor() -> float:
@@ -128,21 +147,21 @@ func hp_frac() -> float:
 
 
 func power() -> float:
-	var s := 0.0
-	for k in weapons:
-		s += float(weapons[k])
-	for k in passives:
-		s += float(passives[k]) * 0.5
+	var s := 1.0
+	for k in skills:
+		s += float(skills[k])
+	for k in general:
+		s += float(general[k]) * 0.5
 	return 1.0 + s * 0.5
 
 
 ## Желаемое расстояние до фронта орды: билд видно по тому, как герой двигается.
 func weapon_range() -> float:
-	if weapons.has("feather") or weapons.has("mirror"):
+	if skills.has("feather") or skills.has("mirror"):
 		return 4.5 * M
-	if weapons.has("bell"):
+	if skills.has("bell") or skills.has("orbit"):
 		return 1.5 * M
-	return 2.0 * M
+	return 1.6 * M
 
 
 static func opos(o) -> Vector2:
@@ -180,16 +199,21 @@ func say(s: String) -> void:
 func update(delta: float) -> void:
 	var t: float = game.time
 	stun = maxf(0.0, stun - delta)
+	trapped = maxf(0.0, trapped - delta)
 	held = maxf(0.0, held - delta)
 	ram_immune = maxf(0.0, ram_immune - delta)
 	hurt = maxf(0.0, hurt - delta)
-	hp = minf(max_hp(), hp + 0.3 * delta)
 	spike_cd = maxf(0.0, spike_cd - delta)
+	peck_t = maxf(0.0, peck_t - delta)
+	speed_t = maxf(0.0, speed_t - delta)
+	fruit_cd = maxf(0.0, fruit_cd - delta)
+	eat_t = maxf(0.0, eat_t - delta)
+	hp = minf(max_hp(), hp + 0.3 * delta)
 	for k in wariness:
 		wariness[k] = maxf(0.0, float(wariness[k]) - 0.01 * delta)
 	waltz_t -= delta
 	if waltz_t <= 0.0:
-		waltz_t = randf_range(20.0, 40.0)
+		waltz_t = randf_range(15.0, 25.0)
 		waltz_dir = -waltz_dir
 		if mode == Mode.FARM:
 			say("Меняю направление обхода.")
@@ -207,6 +231,7 @@ func update(delta: float) -> void:
 		think_t = 0.5
 		think_now = false
 		_think()
+		_maybe_eat()
 	steer_t -= delta
 	if steer_t <= 0.0:
 		steer_t = 1.0 / 30.0
@@ -214,7 +239,7 @@ func update(delta: float) -> void:
 	_move(delta)
 	_weapons(delta)
 	_pickups(delta)
-	while dmg_log.size() > 0 and float(dmg_log[0][0]) < t - 120.0:
+	while dmg_log.size() > 0 and float(dmg_log[0][0]) < t - 60.0:
 		dmg_log.pop_front()
 
 
@@ -229,9 +254,9 @@ func _scan_near() -> void:
 		if e.dead:
 			continue
 		var d2 := pos.distance_squared_to(e.pos)
-		if d2 < near_r2:
+		if d2 < near_r2 or e.type == Enemy.T.BOSS:
 			near.append(e)
-		if d2 < horde_r2 and e.type != Enemy.T.HAND:
+		if d2 < horde_r2 and not e.is_big():
 			sum += e.pos
 			n += 1
 			nearest_d = minf(nearest_d, sqrt(d2))
@@ -259,24 +284,36 @@ func _attention() -> void:
 	if game.paw_seen():
 		_cand(cands, game.paw, 2.0 + 2.0 * float(wariness["paw"]), view, t)
 	for e in near:
-		if e.type == Enemy.T.HAND:
-			_cand(cands, e, 1.4 + (2.0 if e.grab_state == 1 else 0.0), view, t)
+		match e.type:
+			Enemy.T.HAND:
+				_cand(cands, e, 1.4 + (2.0 if e.grab_state == 1 else 0.0), view, t)
+			Enemy.T.BOSS:
+				_cand(cands, e, 2.2 + (1.5 if e.state != 0 else 0.0), view * 1.5, t)
+			Enemy.T.BOX:
+				_cand(cands, e, 1.6, view, t)
+			Enemy.T.SUPER:
+				_cand(cands, e, 1.2 + (1.5 if e.state == 1 else 0.0), view, t)
 	for c in game.chests:
 		_cand(cands, c, 1.2, view, t)
-	for a in game.apples:
-		_cand(cands, a, 0.3 + 1.5 * (1.0 - hp_frac()), view, t)
 	for g in game.gems:
-		if g["big"]:
-			_cand(cands, g, 0.6, view, t)
+		if g["big"] or g["glow"]:
+			_cand(cands, g, 0.6 + (0.6 if g["glow"] else 0.0), view, t)
 	for s in game.enemy_shots:
 		_cand(cands, s, 0.9, view, t)
+	for s in game.thrown:
+		_cand(cands, s, 1.0, view, t)
+	for s in game.missiles:
+		_cand(cands, s, 1.1, view, t)
+	var ev: Dictionary = game.event
+	if not ev.is_empty() and ev.has("pos"):
+		_cand(cands, ev, 1.3, view * 2.0, t)
 	if horde_count > 0:
 		_cand(cands, horde_obj, 1.0 + minf(float(horde_count), 30.0) * 0.03, view, t)
 	cands.sort_custom(func(a, b): return a["s"] > b["s"])
 	var nf: Array = []
 	var ids: Array[int] = []
 	# Туннель жадности: вцепившийся герой прибивает один слот к цели.
-	if (mode == Mode.GOAL or mode == Mode.HUNT) and greed > 0.6 and valid(target):
+	if (mode == Mode.GOAL or mode == Mode.HUNT or mode == Mode.EVENT) and greed > 0.6 and valid(target):
 		nf.append(target)
 		ids.append(oid(target))
 	for c in cands:
@@ -308,7 +345,7 @@ func _cand(cands: Array, o, base: float, view: float, t: float) -> void:
 	cands.append({"o": o, "id": id, "s": s})
 
 
-## Тень книги: в фокусе замечается за 0,25 с, вне фокуса — за 0,7 с.
+## Тень книги: в фокусе замечается за 0,3 с, вне фокуса — за 0,7 с.
 func _notice_meteors() -> void:
 	var t: float = game.time
 	for m in game.meteors:
@@ -340,9 +377,9 @@ func danger_at(p: Vector2, with_meteors: bool = true) -> float:
 		var re := 2.5 * M
 		var w := clampf(e.dmg * hpk, 0.08, 1.0)
 		match e.type:
-			Enemy.T.BALL:
-				re = 4.0 * M
-				c += e.move_dir * 1.5 * M
+			Enemy.T.YARN:
+				re = 3.5 * M
+				c += e.move_dir * 1.2 * M
 			Enemy.T.SLIPPER:
 				re = 3.0 * M
 			Enemy.T.SPRAYER:
@@ -354,22 +391,39 @@ func danger_at(p: Vector2, with_meteors: bool = true) -> float:
 				else:
 					re = 5.0 * M
 					w *= 0.6
+			Enemy.T.SUPER:
+				re = 3.5 * M
+				if e.state == 1:
+					w = 1.2
+			Enemy.T.BOX:
+				continue
+			Enemy.T.BOSS:
+				re = 5.5 * M
+				w = 1.2
+				if e.state == 2:
+					# телеграф тарана: опасна вся полоса, если герой её видит
+					if focus_ids.has(e.id) or pos.distance_to(e.pos) < 6.0 * M:
+						var q := Geometry2D.get_closest_point_to_segment(p, e.pos, e.pos + e.dash_dir * 13.0 * M)
+						if p.distance_to(q) < 1.6 * M:
+							d += 2.0
 		var dist := p.distance_to(c)
 		if dist < re:
 			d += w * (1.0 - dist / re)
-	for m in game.meteors:
-		if with_meteors and not m["landed"] and float(m["notice_t"]) >= 0.0:
-			if p.distance_to(m["pos"]) < float(m["r"]) + 1.0 * M:
-				d += 2.0
-	for s in game.enemy_shots:
-		var sp: Vector2 = s["pos"]
-		if focus_ids.has(int(s["id"])) or pos.distance_to(sp) < 3.0 * M:
-			for k in 3:
-				var q: Vector2 = sp + s["vel"] * (0.5 * k)
-				var dq := p.distance_to(q)
-				if dq < 1.5 * M:
-					d += 0.7 * (1.0 - dq / (1.5 * M))
-					break
+	if with_meteors:
+		for m in game.meteors:
+			if not m["landed"] and float(m["notice_t"]) >= 0.0:
+				if p.distance_to(m["pos"]) < float(m["r"]) + 1.0 * M:
+					d += 2.0
+	for arr in [game.enemy_shots, game.thrown, game.missiles]:
+		for s in arr:
+			var sp: Vector2 = s["pos"]
+			if focus_ids.has(int(s["id"])) or pos.distance_to(sp) < 3.0 * M:
+				for k in 3:
+					var q: Vector2 = sp + Vector2(s["vel"]) * (0.25 * k)
+					var dq := p.distance_to(q)
+					if dq < 1.5 * M:
+						d += 0.8 * (1.0 - dq / (1.5 * M))
+						break
 	if game.paw_threat:
 		var pp: Vector2 = game.paw["pos"]
 		var q: Vector2 = pp + game.paw_vel.normalized() * M
@@ -400,6 +454,8 @@ func _update_stress(delta: float) -> void:
 
 
 func _sunk_cost() -> float:
+	if mode == Mode.EVENT:
+		return float(game.event_progress())
 	if (mode == Mode.GOAL or mode == Mode.HUNT) and valid(target):
 		return clampf(1.0 - pos.distance_to(opos(target)) / maxf(target_d0, 1.0), 0.0, 1.0)
 	return 0.0
@@ -407,7 +463,7 @@ func _sunk_cost() -> float:
 
 func _update_greed() -> void:
 	var q := 0.0
-	if (target_kind == "chest" or target_kind == "hand") and chests_opened < 3:
+	if target_kind == "chest" or target_kind == "hand" or mode == Mode.EVENT:
 		q = 1.0
 	var lc: float = game.last_chance()
 	greed = clampf(greed0 + 0.2 * q + 0.35 * _sunk_cost() * stubborn + 0.4 * lc - 0.45 * stress - 0.25 * (1.0 - hp_frac()), 0.0, 1.0)
@@ -430,46 +486,53 @@ func _utility(p: Vector2, v: float, n: float, q: float, e_exp: float) -> Array:
 	return [u, r]
 
 
+func _consider(best: Dictionary, o, kind: String, r: Array) -> Dictionary:
+	if best.is_empty() or float(r[0]) > float(best["u"]):
+		return {"o": o, "kind": kind, "u": r[0], "risk": r[1]}
+	return best
+
+
 func _best_poi() -> Dictionary:
 	var best := {}
-	var bu := 0.0
 	var view := view_radius()
 	# осторожный возводит риск в степень 2,3, жадный — в 0,3
 	var e_exp := lerpf(2.3, 0.3, greed)
-	var q_goal := 1.0
-	if chests_opened < 3:
-		q_goal = 1.0 + 0.5 * perfection / 0.6
-		if game.last_chance() > 0.0:
-			q_goal = 2.5
+	var q_goal := 1.0 + 0.5 * perfection / 0.6
+	if game.last_chance() > 0.0:
+		q_goal = 2.5
 	for c in game.chests:
-		var r := _utility(c["pos"], 25.0, 1.0, q_goal, e_exp)
-		if r[0] > bu:
-			bu = r[0]
-			best = {"o": c, "kind": "chest", "u": r[0], "risk": r[1]}
+		best = _consider(best, c, "chest", _utility(c["pos"], 25.0, 1.0, q_goal, e_exp))
 	for e in near:
 		if e.type == Enemy.T.HAND and e.carries_chest:
 			var n := clampf(power() / maxf(e.hp / 40.0, 0.5), 0.0, 2.0)
-			var r := _utility(e.pos, 18.0, n, q_goal, e_exp)
-			if r[0] > bu:
-				bu = r[0]
-				best = {"o": e, "kind": "hand", "u": r[0], "risk": r[1]}
-	var hpf := hp_frac()
-	if hpf < 0.95:
-		for a in game.apples:
-			if pos.distance_to(a["pos"]) < view:
-				var r := _utility(a["pos"], 30.0, pow(1.0 - hpf, 2.0), 1.0, e_exp)
-				if r[0] > bu:
-					bu = r[0]
-					best = {"o": a, "kind": "apple", "u": r[0], "risk": r[1]}
+			best = _consider(best, e, "hand", _utility(e.pos, 18.0, n, q_goal, e_exp))
+	# цели ивентов объявлены на всю комнату: герой знает о них, как знал бы живой игрок
+	for e in game.enemies:
+		if e.type == Enemy.T.BOX and not e.dead:
+			best = _consider(best, e, "box", _utility(e.pos, 30.0, 1.0 + float(game.event_progress()), q_goal, e_exp))
+	var ev: Dictionary = game.event
+	if not ev.is_empty():
+		match ev["type"]:
+			"circle":
+				var r := _utility(ev["pos"], 22.0, 1.0 + float(game.event_progress()), q_goal, e_exp)
+				best = _consider(best, ev, "circle", r)
+			"altar":
+				# характер: жадный герой соглашается при здоровье выше 50%
+				if hp_frac() > 0.5 and greed > 0.35:
+					best = _consider(best, ev, "altar", _utility(ev["pos"], 26.0, 1.0, 1.0, e_exp))
 	var prog := float(xp) / float(xp_next)
+	var trust := 1.0 - float(wariness["millet"])
 	var checked := 0
 	for g in game.gems:
-		if g["big"] and checked < 8 and pos.distance_to(g["pos"]) < view:
-			checked += 1
-			var r := _utility(g["pos"], 8.0, 1.0 + 2.0 * prog * prog, 1.0, e_exp)
-			if r[0] > bu:
-				bu = r[0]
-				best = {"o": g, "kind": "gem", "u": r[0], "risk": r[1]}
+		if checked >= 14 or not (g["big"] or g["glow"]):
+			continue
+		if pos.distance_to(g["pos"]) > view and not g["glow"]:
+			continue
+		checked += 1
+		if g["glow"]:
+			best = _consider(best, g, "glow", _utility(g["pos"], 18.0, 1.0 + float(game.event_progress()), q_goal, e_exp))
+		else:
+			best = _consider(best, g, "gem", _utility(g["pos"], 8.0 * trust, 1.0 + 2.0 * prog * prog, 1.0, e_exp))
 	return best
 
 
@@ -511,26 +574,31 @@ func _think() -> void:
 	var hpf := hp_frac()
 	var flee_thr := lerpf(0.35, 0.15, greed)
 	var poi := _best_poi()
-	var u := [0.0, 0.0, 0.0, 0.0, 0.0]
+	var u := [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 	u[Mode.FARM] = 0.45 if stress < 0.4 else 0.3
+	var pk := ""
 	if not poi.is_empty() and float(poi["u"]) > 6.0:
+		pk = poi["kind"]
 		var uu := clampf(float(poi["u"]) / 20.0, 0.4, 1.0)
-		if poi["kind"] == "hand":
-			u[Mode.HUNT] = uu
-		else:
-			u[Mode.GOAL] = uu
+		match pk:
+			"hand", "box":
+				u[Mode.HUNT] = uu
+			"circle", "altar", "glow":
+				u[Mode.EVENT] = uu
+			_:
+				u[Mode.GOAL] = uu
 	var must_flee := stress > 0.6 or hpf < flee_thr
 	u[Mode.RETREAT] = 0.95 if must_flee else 0.0
 	if mode != Mode.PANIC:
 		u[mode] += 0.1 + 0.15 * stubborn + 0.4 * stubborn * _sunk_cost()
 	var best := 0
-	for i in 5:
+	for i in 6:
 		if u[i] > u[best]:
 			best = i
 	# минимальное время в режиме — 1,5 с (бегство его перебивает)
 	if mode_time < 1.5 and best != mode and not (best == Mode.RETREAT and must_flee):
 		best = mode
-	if best == Mode.GOAL or best == Mode.HUNT:
+	if best == Mode.GOAL or best == Mode.HUNT or best == Mode.EVENT:
 		if poi.is_empty():
 			best = Mode.FARM
 		else:
@@ -548,9 +616,9 @@ func _think() -> void:
 	elif best != mode:
 		target = null
 		target_kind = ""
-	var names := ["Кружу орду, собираю просо.", "", "", "Слишком горячо. Отхожу.", ""]
+	var names := ["Кружу орду, собираю просо.", "", "", "", "Слишком горячо. Отхожу.", ""]
 	if best == Mode.RETREAT and hpf < flee_thr:
-		names[Mode.RETREAT] = "Здоровье %d%%. Ухожу и ищу яблоко." % int(hpf * 100.0)
+		names[Mode.RETREAT] = "Здоровье %d%%. Ухожу." % int(hpf * 100.0)
 	_set_mode(best, names[best])
 
 
@@ -563,10 +631,62 @@ func _say_target(poi: Dictionary) -> void:
 			say("Кормушка в %d м. Риск %s. Иду." % [dm, rw])
 		"hand":
 			say("Рука несёт кормушку! Охочусь.")
-		"apple":
-			say("Долька яблока в %d м. Риск %s." % [dm, rw])
 		"gem":
 			say("Колосок проса в %d м. Беру." % dm)
+		"glow":
+			say("Светящееся зерно в %d м!" % dm)
+		"circle":
+			say("Пятно солнца в %d м. Риск %s. Встаю." % [dm, rw])
+		"box":
+			say("Шкатулка удирает! Догоняю.")
+		"altar":
+			say("Лакомство... Рискну, здоровья хватает.")
+
+
+## Фрукты: герой съедает их сам, когда ситуация подходит.
+func _maybe_eat() -> void:
+	if fruits.is_empty() or fruit_cd > 0.0 or stun > 0.0 or held > 0.0:
+		return
+	var hpf := hp_frac()
+	var boss_near := false
+	for e in near:
+		if e.type == Enemy.T.BOSS and pos.distance_to(e.pos) < 4.0 * M:
+			boss_near = true
+	var crowd := 0
+	for e in near:
+		if pos.distance_to(e.pos) < 3.5 * M:
+			crowd += 1
+	for f in fruits:
+		var why := ""
+		match f:
+			"apple":
+				if hpf < 0.45:
+					why = "Ем яблоко, лечусь."
+			"chili":
+				if crowd >= 10 or boss_near:
+					why = "Перец! Сейчас всех обожгу."
+			"carrot":
+				if mode == Mode.PANIC or (mode == Mode.RETREAT and stress > 0.6) or (mode == Mode.HUNT and target_kind == "box"):
+					why = "Морковка, бегу быстрее."
+			"grape":
+				if stress < 0.45:
+					why = "Виноград: сразу уровень."
+			"lemon":
+				if (hpf < 0.6 and stress > 0.6) or boss_near:
+					why = "Лимон, кислый щит."
+		if why != "":
+			fruits.erase(f)
+			fruit_cd = 2.0
+			eat_t = 0.5
+			say(why)
+			game.on_fruit_eaten(f)
+			return
+
+
+func add_fruit(f: String) -> void:
+	if fruits.size() >= 3:
+		fruits.pop_front()
+	fruits.append(f)
 
 
 # ---------- движение: контекстное руление ----------
@@ -601,11 +721,19 @@ func _steer() -> void:
 		Mode.GOAL:
 			if has_t:
 				goals.append([(tp - pos).normalized(), 1.0])
+		Mode.EVENT:
+			if has_t:
+				if target_kind == "circle":
+					_circle_goals(goals, tp, float(target["r"]))
+				else:
+					goals.append([(tp - pos).normalized(), 1.0])
 		Mode.HUNT:
 			if has_t:
 				var to_t := tp - pos
 				var dt := to_t.length()
 				var want := weapon_range() + 0.5 * M
+				if target_kind == "box":
+					want = 1.0 * M
 				var n := to_t / maxf(dt, 1.0)
 				var tangent := Vector2(-n.y, n.x) * waltz_dir
 				goals.append([(n * clampf((dt - want) / want, -1.0, 1.0) * 1.5 + tangent * 0.5).normalized(), 1.0])
@@ -613,21 +741,12 @@ func _steer() -> void:
 			var away := pos - horde_center if horde_count > 0 else Vector2.ZERO
 			if away.length() > 1.0:
 				goals.append([away.normalized(), 1.0])
-			var best_a = null
-			var bd := 99999.0
-			for ap in game.apples:
-				var d := pos.distance_to(ap["pos"])
-				if d < bd:
-					bd = d
-					best_a = ap
-			if best_a != null:
-				goals.append([(opos(best_a) - pos).normalized(), 1.2])
 			goals.append([(game.floor_rect.get_center() - pos).normalized(), 0.3 * _edge_factor()])
 	if mode == Mode.PANIC:
 		var gap := _widest_gap(D, 0.8 - 0.4 * stress)
 		if gap != Vector2.ZERO:
 			goals.append([gap, 1.0])
-	if mode != Mode.PANIC:
+	else:
 		var gr := 4.0 * M
 		for g in game.gems:
 			var gp: Vector2 = g["pos"]
@@ -681,7 +800,7 @@ func _steer() -> void:
 			if D[i] < D[mi]:
 				mi = i
 		desired = dirs[mi]
-		if mode != Mode.PANIC:
+		if mode != Mode.PANIC and game.time - panic_exit_t > 2.0:
 			target = null
 			target_kind = ""
 			_set_mode(Mode.PANIC, "Все пути закрыты! Паника!")
@@ -703,8 +822,20 @@ func _steer() -> void:
 	if mode == Mode.PANIC:
 		desired = desired.rotated(randf_range(-0.26, 0.26))
 	# подбор: последние 2 м до награды идёт по прямой
-	if mode == Mode.GOAL and has_t and pos.distance_to(tp) < 2.0 * M:
+	if (mode == Mode.GOAL or (mode == Mode.EVENT and target_kind != "circle")) and has_t and pos.distance_to(tp) < 2.0 * M:
 		desired = (tp - pos).normalized()
+
+
+## Пятно солнца: внутри кайтит, граница пятна — стена.
+func _circle_goals(goals: Array, c: Vector2, r: float) -> void:
+	var to_c := c - pos
+	var d := to_c.length()
+	if d > r * 0.8:
+		goals.append([to_c / maxf(d, 1.0), 1.5])
+		return
+	_farm_goals(goals)
+	if d > r * 0.5:
+		goals.append([to_c / maxf(d, 1.0), 1.2 * (d / r)])
 
 
 func _farm_goals(goals: Array) -> void:
@@ -780,10 +911,14 @@ func _dir_index(v: Vector2) -> int:
 
 
 func _move(delta: float) -> void:
+	# засасывание пылесоса действует всегда
+	if pull_vel != Vector2.ZERO:
+		pos = game.resolve_circle(pos + pull_vel * delta, radius)
+		pull_vel = Vector2.ZERO
 	if dodge_t > 0.0:
 		dodge_t -= delta
 		pos = game.resolve_circle(pos + dodge_vel * delta, radius)
-	if stun > 0.0 or held > 0.0:
+	if stun > 0.0 or held > 0.0 or trapped > 0.0:
 		pos = game.resolve_circle(pos + knock_vel * delta, radius)
 		knock_vel *= exp(-8.0 * delta)
 		vel = Vector2.ZERO
@@ -798,7 +933,7 @@ func _move(delta: float) -> void:
 		return
 	stuck_t += delta
 	if stuck_t >= 1.0:
-		if pos.distance_to(stuck_ref) < 14.0 and mode != Mode.PANIC:
+		if pos.distance_to(stuck_ref) < 14.0 and mode != Mode.PANIC and not (mode == Mode.EVENT and target_kind == "circle"):
 			unstick_t = 0.6
 			var open: Array[Vector2] = []
 			for i in NDIR:
@@ -822,43 +957,70 @@ func _move(delta: float) -> void:
 	pos = game.resolve_circle(pos + vel * delta, radius)
 
 
-# ---------- оружие ----------
+# ---------- атаки ----------
 
 func _weapons(delta: float) -> void:
-	if held > 0.0:
+	if held > 0.0 or stun > 0.0 or trapped > 0.0:
 		return
-	for k in weapons.keys():
+	# базовый клевок есть всегда
+	var pc: float = float(cds.get("peck", 0.0)) - delta
+	cds["peck"] = pc
+	if pc <= 0.0:
+		var ts: Array = game.enemies_near(pos, 1.7 * M + 10.0, 1)
+		if ts.is_empty():
+			cds["peck"] = 0.08
+		else:
+			var e: Enemy = ts[0]
+			peck_dir = (e.pos - pos).normalized()
+			peck_t = 0.18
+			game.damage_enemy(e, 11.0 * dmg_mult(), peck_dir * 140.0)
+			game.add_fx({"kind": "peck", "pos": pos, "to": e.pos, "dur": 0.2})
+			game.sfx("peck", -6.0, randf_range(0.9, 1.15))
+			cds["peck"] = 0.42
+	for k in skills.keys():
 		var cd: float = float(cds.get(k, 0.0)) - delta
 		cds[k] = cd
+		var lvl: int = skills[k]
+		if k == "orbit":
+			_orbit(delta, lvl)
+			continue
 		if cd > 0.0:
 			continue
-		var lvl: int = weapons[k]
 		match k:
-			"peck":
-				var rng := (2.1 + 0.15 * lvl) * M
-				var ts: Array = game.enemies_near(pos, rng, 1 + int(lvl / 2))
-				if ts.is_empty():
-					cds[k] = 0.1
-					continue
-				for e in ts:
-					game.damage_enemy(e, (9.0 + 3.0 * lvl) * dmg_mult(), (e.pos - pos).normalized() * 120.0)
-				game.add_fx({"kind": "peck", "pos": pos, "to": ts[0].pos, "dur": 0.15})
-				cds[k] = 0.6 - 0.04 * lvl
 			"feather":
 				var ts: Array = game.enemies_near(pos, 8.0 * M, 1)
 				if ts.is_empty():
 					cds[k] = 0.2
 					continue
-				var count := 1 + int((lvl - 1) / 2)
+				var count := 1 + int((lvl - 1) / 2) + (2 if has_mod("feather_fan") else 0)
 				var base: Vector2 = (ts[0].pos - pos).normalized()
 				for j in count:
-					var dir := base.rotated((float(j) - float(count - 1) * 0.5) * 0.18)
-					game.shots.append({"pos": pos, "vel": dir * 9.0 * M, "dmg": (7.0 + 3.0 * lvl) * dmg_mult(), "pierce": 1 + int(lvl / 2), "life": 1.2, "hit": []})
-				cds[k] = 1.25 - 0.1 * lvl
+					var dir := base.rotated((float(j) - float(count - 1) * 0.5) * 0.2)
+					game.shots.append({"pos": pos, "vel": dir * 9.0 * M, "dmg": (7.0 + 3.0 * lvl) * dmg_mult(),
+						"pierce": 1 + int(lvl / 2) + (3 if has_mod("feather_pierce") else 0),
+						"life": 2.4 if has_mod("feather_bounce") else 1.2, "hit": [],
+						"bounce": 3 if has_mod("feather_bounce") else 0, "homing": has_mod("feather_homing"), "ice": has_mod("feather_ice")})
+				cds[k] = 1.2 - 0.08 * lvl
 			"bell":
-				var rr := (1.6 + 0.25 * lvl) * M
+				var rr := (1.6 + 0.25 * lvl) * M * (1.4 if has_mod("bell_wide") else 1.0)
+				var tick := int(cds.get("bell_n", 0)) + 1
+				cds["bell_n"] = tick
 				for e in game.enemies_near(pos, rr, 999):
-					game.damage_enemy(e, (2.0 + 1.5 * lvl) * dmg_mult(), Vector2.ZERO)
+					var kb := Vector2.ZERO
+					if has_mod("bell_push") and tick % 4 == 0:
+						kb = (e.pos - pos).normalized() * 240.0
+					elif has_mod("bell_pull"):
+						kb = (pos - e.pos).normalized() * 60.0
+					game.damage_enemy(e, (2.0 + 1.5 * lvl) * dmg_mult(), kb)
+					if has_mod("bell_stun") and tick % 6 == 0:
+						e.stun = maxf(e.stun, 0.4)
+				if has_mod("bell_pull"):
+					for e in game.enemies_near(pos, rr * 1.8, 999):
+						if not e.is_big():
+							e.push_vel += (pos - e.pos).normalized() * 30.0 * e.push_factor
+				if (has_mod("bell_push") and tick % 4 == 0) or (has_mod("bell_stun") and tick % 6 == 0):
+					game.add_fx({"kind": "ring", "pos": pos, "r": rr, "dur": 0.3, "color": Color(0.95, 0.75, 0.25, 0.8)})
+					game.sfx("jingle", -12.0, 1.3)
 				cds[k] = 0.5
 			"mirror":
 				var ts: Array = game.enemies_near(pos, 7.0 * M, 6)
@@ -867,22 +1029,103 @@ func _weapons(delta: float) -> void:
 					continue
 				var e0: Enemy = ts[randi() % ts.size()]
 				var dir: Vector2 = (e0.pos - pos).normalized()
-				var b := pos + dir * 9.0 * M
-				for e in game.enemies_near(pos.lerp(b, 0.5), 4.6 * M, 999):
-					if Geometry2D.get_closest_point_to_segment(e.pos, pos, b).distance_to(e.pos) < e.radius + 0.45 * M:
-						game.damage_enemy(e, (12.0 + 6.0 * lvl) * dmg_mult(), dir * 60.0)
-				game.add_fx({"kind": "beam", "pos": pos, "to": b, "dur": 0.25})
+				var dmg := (12.0 + 6.0 * lvl) * dmg_mult()
+				_beam(pos, dir, dmg)
+				if has_mod("mirror_double"):
+					_beam(pos, -dir, dmg)
 				cds[k] = 2.4 - 0.25 * lvl
 			"scream":
-				var rr := (2.4 + 0.4 * lvl) * M
+				var rr := (2.4 + 0.4 * lvl) * M * (1.35 if has_mod("scream_wide") else 1.0)
 				var ts: Array = game.enemies_near(pos, rr, 999)
 				if ts.size() < 4:
 					cds[k] = 0.3
 					continue
-				for e in ts:
-					game.damage_enemy(e, (8.0 + 5.0 * lvl) * dmg_mult(), (e.pos - pos).normalized() * 260.0)
-				game.add_fx({"kind": "ring", "pos": pos, "r": rr, "dur": 0.35, "color": Color(0.55, 0.45, 0.85, 0.8)})
-				cds[k] = 5.0 - 0.5 * lvl
+				_scream(rr, (8.0 + 5.0 * lvl) * dmg_mult())
+				if has_mod("scream_echo"):
+					game.delayed.append({"at": game.time + 0.5, "kind": "echo", "r": rr, "dmg": (8.0 + 5.0 * lvl) * 0.7})
+				cds[k] = (5.0 - 0.5 * lvl) * (0.65 if has_mod("scream_fast") else 1.0)
+
+
+func _beam(from: Vector2, dir: Vector2, dmg: float) -> void:
+	var length := 9.0 * M * (1.5 if has_mod("mirror_long") else 1.0)
+	var width := 0.45 * M * (1.6 if has_mod("mirror_long") else 1.0)
+	var b := from + dir * length
+	var hit: Array = []
+	for e in game.enemies_near(from.lerp(b, 0.5), length * 0.5 + 20.0, 999):
+		if Geometry2D.get_closest_point_to_segment(e.pos, from, b).distance_to(e.pos) < e.radius + width:
+			game.damage_enemy(e, dmg, dir * 60.0)
+			hit.append(e)
+			if has_mod("mirror_blind"):
+				e.stun = maxf(e.stun, 0.6)
+	game.add_fx({"kind": "beam", "pos": from, "to": b, "dur": 0.25})
+	if has_mod("mirror_burn"):
+		game.add_fx({"kind": "burnline", "pos": from, "to": b, "dur": 2.0, "dps": dmg * 0.4})
+	if has_mod("mirror_chain") and hit.size() > 0:
+		var cur: Enemy = hit[hit.size() - 1]
+		for j in 2:
+			var nxt: Array = game.enemies_near(cur.pos, 5.0 * M, 4)
+			var picked: Enemy = null
+			for c in nxt:
+				if not hit.has(c):
+					picked = c
+					break
+			if picked == null:
+				break
+			game.damage_enemy(picked, dmg * 0.7, Vector2.ZERO)
+			game.add_fx({"kind": "beam", "pos": cur.pos, "to": picked.pos, "dur": 0.25})
+			hit.append(picked)
+			cur = picked
+	game.sfx("chime", -16.0, 2.0)
+
+
+func scream_at(rr: float, dmg: float) -> void:
+	_scream(rr, dmg)
+
+
+func _scream(rr: float, dmg: float) -> void:
+	for e in game.enemies_near(pos, rr, 999):
+		game.damage_enemy(e, dmg, (e.pos - pos).normalized() * 260.0)
+		if has_mod("scream_stun"):
+			e.stun = maxf(e.stun, 0.5)
+		if has_mod("scream_fear"):
+			e.fear = 1.5
+	game.add_fx({"kind": "ring", "pos": pos, "r": rr, "dur": 0.35, "color": Color(0.55, 0.45, 0.85, 0.8)})
+	game.sfx("squawk", -8.0, 0.8)
+
+
+func orbit_count() -> int:
+	var l := lvl_of("orbit")
+	if l <= 0:
+		return 0
+	return 1 + int(l / 2) + (2 if has_mod("orbit_more") else 0)
+
+
+func orbit_radius() -> float:
+	return (2.4 if has_mod("orbit_wide") else 1.6) * M
+
+
+func _orbit(delta: float, lvl: int) -> void:
+	orbit_angle += delta * 3.0 * (1.6 if has_mod("orbit_fast") else 1.0)
+	for p in orbit_points():
+		for e in game.enemies_near(p, 18.0, 4):
+			if e.orbit_cd > 0.0:
+				continue
+			e.orbit_cd = 0.5
+			var kb: Vector2 = (e.pos - pos).normalized() * (320.0 if has_mod("orbit_knock") else 90.0)
+			game.damage_enemy(e, (6.0 + 3.0 * lvl) * dmg_mult(), kb)
+			if has_mod("orbit_fire"):
+				e.burn = 2.0
+				e.burn_dps = 3.0 + lvl
+
+
+func orbit_points() -> Array[Vector2]:
+	var res: Array[Vector2] = []
+	var n := orbit_count()
+	var r := orbit_radius()
+	for i in n:
+		var a := orbit_angle + TAU * float(i) / float(n)
+		res.append(pos + Vector2(cos(a), sin(a)) * r)
+	return res
 
 
 func _pickups(delta: float) -> void:
@@ -890,18 +1133,11 @@ func _pickups(delta: float) -> void:
 	for g in game.gems:
 		var gp: Vector2 = g["pos"]
 		var d := pos.distance_to(gp)
-		if d < mr:
+		if d < mr and not g["glow"]:
 			g["pos"] = gp.move_toward(pos, (260.0 + (mr - d) * 5.0) * delta)
-		if d < radius + 6.0:
+		if d < radius + 8.0:
 			g["taken"] = true
-			xp += int(g["xp"])
-	for a in game.apples:
-		if pos.distance_to(a["pos"]) < radius + 12.0:
-			a["taken"] = true
-			hp = minf(max_hp(), hp + 25.0)
-			game.add_text(pos + Vector2(0, -40), "+25", Color("5a9a4a"), 18)
-			if mode == Mode.RETREAT:
-				say("Яблочко. Уже лучше.")
+			game.on_gem_taken(g)
 	if opening <= 0.0 and opening_chest == null:
 		for c in game.chests:
 			if pos.distance_to(c["pos"]) < radius + 18.0:
@@ -916,7 +1152,13 @@ func _pickups(delta: float) -> void:
 func take_damage(amount: float, src: String, label: String, from_player: bool) -> void:
 	if game.over != "":
 		return
-	var a := amount if src == "meteor" else maxf(1.0, amount - armor())
+	if shield_hits > 0 and src != "rotten":
+		shield_hits -= 1
+		game.add_text(pos + Vector2(0, -50), "щит!", Color("c9b52a"), 18)
+		return
+	var a := amount if src == "meteor" or src == "rotten" else maxf(1.0, amount - armor())
+	if has_mod("bell_armor") and horde_count >= 3 and nearest_d < 2.2 * M:
+		a *= 0.7
 	hp -= a
 	hurt = 0.2
 	dmg_log.append([game.time, src, a])
@@ -956,13 +1198,18 @@ func grabbed(e: Enemy) -> void:
 	say("Рука схватила! Вырываюсь.")
 
 
-# ---------- перки ----------
+func knocked(dir: Vector2, power: float, stun_t: float) -> void:
+	knock_vel = dir * power
+	stun = maxf(stun, stun_t)
+
+
+# ---------- выбор умений ----------
 
 func _damage_shares() -> Dictionary:
 	var tot := 0.0
 	var by := {}
 	for r in dmg_log:
-		var cat := Perks.category(r[1])
+		var cat := Skills.category(r[1])
 		by[cat] = float(by.get(cat, 0.0)) + float(r[2])
 		tot += float(r[2])
 	if tot <= 0.0:
@@ -974,60 +1221,52 @@ func _damage_shares() -> Dictionary:
 
 func score_card(card: Dictionary) -> Dictionary:
 	var k: String = card["key"]
-	var s: float = Perks.TIER[k]
+	var s: float = Skills.TIER.get(k, 5.0)
 	var reason := "сильная карта"
 	if plan.has(k):
 		s += 4.0
 		reason = "по плану билда"
-	var has_area := false
-	for a in Perks.AREA:
-		if weapons.has(a):
-			has_area = true
-	if Perks.AREA.has(k) and has_area:
-		s += 1.5
-	var has_single := false
-	for a in Perks.SINGLE:
-		if weapons.has(a) or passives.has(a):
-			has_single = true
-	if Perks.SINGLE.has(k) and has_single:
-		s += 0.8
+	if Skills.AREA.has(k):
+		for a in Skills.AREA:
+			if skills.has(a) and a != k:
+				s += 1.0
+	if card["kind"] == "mod":
+		s += 1.5 + 0.4 * lvl_of(Skills.mod_parent(k))
+		if reason == "сильная карта":
+			reason = "усилю %s" % Skills.NAMES[Skills.mod_parent(k)]
 	var shares := _damage_shares()
 	var best_r := 0.0
 	var best_txt := ""
 	for cat in shares:
-		var resp: Array = Perks.RESPONSE[cat]
+		var resp: Array = Skills.RESPONSE[cat]
 		if resp.has(k):
 			var r := 5.0 * float(shares[cat])
 			if r > best_r:
 				best_r = r
-				best_txt = Perks.RESPONSE_TEXT[cat]
+				best_txt = Skills.RESPONSE_TEXT[cat]
 	s += best_r
 	if best_r > 1.5:
 		reason = best_txt
-	if card["new"]:
-		if Perks.is_weapon(k):
-			s += 2.0 if level < 7 else -1.0
-		else:
-			s += 1.5 if level >= 7 else 0.0
-	elif level >= 7:
-		s += 1.0
+	if card["new"] and card["kind"] == "skill":
+		s += 2.5 if level < 6 else 0.5
 	s += randf_range(-0.5, 0.5)
 	return {"score": s, "reason": reason}
 
 
 func consume_level() -> void:
-	xp -= xp_next
+	xp = maxi(0, xp - xp_next)
 	level += 1
-	xp_next = int(5.0 + level * 5.0 + 0.35 * level * level)
-	game.on_hero_level()
+	xp_next = int(5.0 + level * 2.0 + 0.15 * level * level)
 
 
 func apply_card(card: Dictionary) -> void:
 	var k: String = card["key"]
-	var l: int = card["lvl"]
-	if Perks.is_weapon(k):
-		weapons[k] = l
-	else:
-		passives[k] = l
-		if k == "fluff":
-			hp += 20.0
+	match card["kind"]:
+		"skill":
+			skills[k] = int(card["lvl"])
+		"general":
+			general[k] = int(card["lvl"])
+			if k == "fluff":
+				hp += 20.0
+		"mod":
+			mods[Skills.mod_parent(k)] = k

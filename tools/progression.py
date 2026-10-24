@@ -28,7 +28,7 @@ if __name__ == "__main__":
     with ThreadPoolExecutor(max_workers=k) as ex:
         all_series = list(ex.map(lambda i: series(i, n), range(k)))
     print(f"Серий: {k}, забегов в серии: {n}")
-    print("забеги | побед попугая | ур. в конце | исследований /6 | узлов штаба | прокачка попугая (сумма ур.) | умений у Кеши | перьев в запасе")
+    print("забеги | побед попугая | ур. в конце | исследований /6 | узлов штаба | прокачка попугая (сумма ур.) | умений у Кеши | перьев в запасе | сложность (средн., откр.) | попугаев")
     step = 1 if n <= 12 else 5
     for i in range(0, n, step):
         rs = [r for s in all_series for r in s[i:i + step]]
@@ -41,7 +41,10 @@ if __name__ == "__main__":
         up = sum(sum(r["up"].values()) for r in rs) / len(rs)
         psk = sum(len(r.get("pskills", [])) for r in rs) / len(rs)
         fe = sum(r.get("feathers", 0) for r in rs) / len(rs)
-        print(f"{i + 1:3d}-{min(n, i + step):3d} | {wins}/{len(rs)} ({100 * wins // len(rs)}%) | {lvl:.1f} | {unl:.1f} | {hq:.1f} | {up:.1f} | {psk:.1f} | {fe:.0f}")
+        dm = sum(r.get("diff", 0) for r in rs) / len(rs)
+        du = sum(r.get("dunl", 0) for r in rs) / len(rs)
+        nb = sum(r.get("birds", 1) for r in rs) / len(rs)
+        print(f"{i + 1:3d}-{min(n, i + step):3d} | {wins}/{len(rs)} ({100 * wins // len(rs)}%) | {lvl:.1f} | {unl:.1f} | {hq:.1f} | {up:.1f} | {psk:.1f} | {fe:.0f} | {dm:.2f}, {du:.2f} | {nb:.1f}")
     skills = {}
     for s in all_series:
         for r in s:

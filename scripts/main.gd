@@ -496,6 +496,8 @@ func start_run() -> void:
 		hero.pos = Vector2(FIELD.position.x - 80, 120)
 	Engine.time_scale = game_speed
 	add_thought("Цель: сломать пылесос, иначе отсюда не выбраться.")
+	if not sim:
+		banner("%s комната" % String(Diff.level(diff)["name"]), Diff.level(diff)["color"], 34, 2.6)
 	var reason := String(Diff.data(meta).get("reason", ""))
 	if reason != "":
 		add_thought(reason)
@@ -2661,8 +2663,6 @@ func begin_levelup() -> void:
 	menu = {}
 	aim = {}
 	hero.consume_level()
-	if not sim:
-		add_text(hero.pos + Vector2(0, -96), "орда крепнет: +%d%%" % int(round(HORDE_HP_LEVEL * 100.0 * float(hero.level - 1))), Color("3f6fb5"), 16)
 	var cards := _make_cards()
 	if cards.is_empty():
 		hero.hp = minf(hero.max_hp(), hero.hp + 20.0)
@@ -3383,6 +3383,12 @@ func _save_run(feathers: int) -> void:
 	if sim:
 		# в прогоне прогрессии игрок получает перья сразу и покупает самое дешёвое доступное
 		save["feathers"] = int(save.get("feathers", 0)) + feathers
+		if over == "hero_dead":
+			# яйцо в прогоне открывается само
+			var ra := Rewards.roll_player(save)
+			var rb := Rewards.roll_parrot(meta)
+			Rewards.apply_player(save, ra)
+			Rewards.apply_parrot(meta, rb)
 		var again := true
 		while again:
 			again = false

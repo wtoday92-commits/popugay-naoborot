@@ -2790,7 +2790,7 @@ func on_hero_damaged(a: float, src: String, label: String, from_player: bool) ->
 	var mine := from_player or src == "meteor" or src == "paw"
 	if mine:
 		player_damage += a
-		add_text(hero.pos + Vector2(randf_range(-12, 12), -48), "%s: −%d" % [label, int(round(a))], Color("b23a2e"), 22)
+		add_text(hero.pos + Vector2(randf_range(-12, 12), -48), "−%d" % int(round(a)), Color("6a4fb3"), 22 + mini(10, int(a / 4.0)))
 	else:
 		add_text(hero.pos + Vector2(randf_range(-12, 12), -40), "−%d" % int(round(a)), Color("7a5a4a"), 15)
 	if a >= 3.0:

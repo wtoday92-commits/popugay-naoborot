@@ -12,7 +12,7 @@ const C_STRESS := Color("e07a6a")
 const C_GREED := Color("e8b84a")
 const LEFT := Rect2(0, 0, 340, 1080)
 const RIGHT := Rect2(1580, 0, 340, 1080)
-const QUEUE_Y := 676.0
+const QUEUE_Y := 598.0
 const QUEUE_ROW := 74.0
 const APPEAR := 0.45
 
@@ -83,7 +83,7 @@ func _draw() -> void:
 	_panel("skills", h.skills.size() + h.general.size() > 0, true, func(): _draw_skills(h, fr))
 	_panel("fruits", h.fruits.size() > 0 or h.shield_hits > 0, true, func(): _draw_fruits(h, fr))
 	_panel("goals", playing and game.time > 3.0, true, func(): _draw_goals(h, fr))
-	var q_vis: bool = playing and (not game.first_run or game.time >= game.EVENT_SLOTS[0] - 25.0)
+	var q_vis: bool = playing and game.queue.size() > 0 and (not game.first_run or game.time >= game.EVENT_SLOTS[0] - 25.0)
 	_panel("queue", q_vis, true, func(): _draw_queue(fr))
 	_panel("timer", playing, false, func(): _draw_top(h, fr))
 	_panel("thoughts", game.thoughts.size() > 1 and game.time > 1.0, false, func(): _draw_thoughts(fr))
@@ -120,32 +120,32 @@ func _panel(name: String, visible: bool, from_left: bool, fn: Callable) -> void:
 # ---------- левая полоса ----------
 
 func _draw_hero_card(h: Hero, fr: int) -> void:
-	Art.card(self, Rect2(10, 10, 320, 218), PANEL, fr)
-	_t(Vector2(24, 40), String(Parrots.bird(h.bird)["name"]), 24)
-	_t(Vector2(34 + Art.text_w(font, String(Parrots.bird(h.bird)["name"]), 24), 39), "упрямый коллекционер", 14, Color(INK, 0.65))
-	_t(Vector2(24, 64), "Уровень %d" % h.level, 16)
-	_bar(Rect2(120, 52, 196, 12), float(h.xp) / float(h.xp_next), Color("f2cd5c"), "")
-	_bar(Rect2(24, 74, 292, 20), h.hp_frac(), C_HP if h.hp_frac() >= 0.2 else Color("d95c4a"), "Здоровье %d/%d" % [int(ceil(h.hp)), int(h.max_hp())])
-	_bar(Rect2(24, 100, 292, 15), h.stress, C_STRESS, "Стресс")
-	_bar(Rect2(24, 120, 292, 15), h.greed, C_GREED, "Жадность")
-	if h.greed > h.stress:
-		_t(Vector2(244, 132), "рискует", 12, Color("9a6a10"))
-	_t(Vector2(24, 160), "Режим: " + String(Hero.MODE_NAMES[h.mode]), 16)
-	_t(Vector2(24, 184), "Смотрит на %d из %d" % [h.focus.size(), h.slots] + (" · слоты заморожены" if h.choosing else ""), 13, Color("4f79a8"))
-	var mem := "Забегов в памяти: %d" % h.learned_runs if h.learned_runs > 0 else "Первый забег: память пуста"
-	_t(Vector2(24, 208), mem, 13, Color(INK, 0.6))
+	Art.card(self, Rect2(10, 10, 320, 168), PANEL, fr)
+	var nm := String(Parrots.bird(h.bird)["name"])
+	_t(Vector2(24, 40), nm, 24)
+	_t(Vector2(34 + Art.text_w(font, nm, 24), 39), "уровень %d" % h.level, 16, Color(INK, 0.7))
+	_bar(Rect2(24, 50, 292, 8), float(h.xp) / float(h.xp_next), Color("f2cd5c"), "")
+	_bar(Rect2(24, 66, 292, 22), h.hp_frac(), C_HP if h.hp_frac() >= 0.2 else Color("d95c4a"), "Здоровье %d/%d" % [int(ceil(h.hp)), int(h.max_hp())])
+	_bar(Rect2(24, 94, 292, 14), h.stress, C_STRESS, "Стресс")
+	_t(Vector2(24, 134), String(Hero.MODE_NAMES[h.mode]).capitalize(), 17)
+	# внимание: точки по числу слотов, закрашены занятые
+	_t(Vector2(24, 160), "внимание", 13, Color("4f79a8"))
+	for i in h.slots:
+		var c := Vector2(100 + i * 16, 155)
+		draw_circle(c, 5.0, Color("4f79a8") if i < h.focus.size() else Color(0, 0, 0, 0.1))
+		draw_arc(c, 5.0, 0, TAU, 12, Color("4f79a8"), 1.2)
 	if h.plan.size() > 0:
-		_t(Vector2(206, 160), "план:", 13, Color(INK, 0.6))
-		Icons.draw(self, h.plan[0], Vector2(268, 155), 34.0)
+		_t(Vector2(210, 136), "план", 13, Color(INK, 0.6))
+		Icons.draw(self, h.plan[0], Vector2(276, 140), 40.0)
 
 
 func _draw_skills(h: Hero, fr: int) -> void:
-	Art.card(self, Rect2(10, 236, 320, 206), PANEL, fr + 1)
-	_t(Vector2(24, 260), "Умения", 16)
-	_t(Vector2(174, 260), "Пассивки", 16)
+	Art.card(self, Rect2(10, 186, 320, 200), PANEL, fr + 1)
+	_t(Vector2(24, 210), "Умения", 16)
+	_t(Vector2(174, 210), "Пассивки", 16)
 	var keys: Array = h.skills.keys()
 	for i in 3:
-		var y := 300.0 + i * 50.0
+		var y := 248.0 + i * 46.0
 		if i < keys.size():
 			var k: String = keys[i]
 			Icons.draw(self, k, Vector2(42, y), 42.0)
@@ -158,7 +158,7 @@ func _draw_skills(h: Hero, fr: int) -> void:
 			_slot(Vector2(42, y), 38.0)
 	var gk: Array = h.general.keys()
 	for i in 3:
-		var y := 300.0 + i * 50.0
+		var y := 248.0 + i * 46.0
 		if i < gk.size():
 			Icons.draw(self, gk[i], Vector2(194, y), 42.0)
 			_pips(Vector2(220, y - 4), int(h.general[gk[i]]), Skills.MAX_GEN_LVL)
@@ -166,46 +166,46 @@ func _draw_skills(h: Hero, fr: int) -> void:
 			_slot(Vector2(194, y), 38.0)
 	var hover := _hover_skill(keys, gk, h)
 	if hover != "":
-		_t(Vector2(24, 434), "%s: %s" % [Skills.NAMES[hover], Skills.DESC[hover]], 13, Color(INK, 0.8))
+		_t(Vector2(24, 380), "%s: %s" % [Skills.NAMES[hover], Skills.DESC[hover]], 13, Color(INK, 0.8))
 
 
 func _draw_fruits(h: Hero, fr: int) -> void:
-	Art.card(self, Rect2(10, 450, 320, 84), PANEL, fr + 2)
-	_t(Vector2(24, 474), "Фрукты (ест сам)", 16)
+	Art.card(self, Rect2(10, 394, 320, 84), PANEL, fr + 2)
+	_t(Vector2(24, 418), "Фрукты (ест сам)", 16)
 	for i in 3:
-		var c := Vector2(48 + i * 56, 506)
+		var c := Vector2(48 + i * 56, 450)
 		if i < h.fruits.size():
 			Icons.draw(self, h.fruits[i], c, 44.0)
 		else:
 			_slot(c, 40.0)
 	if h.fruits.size() > 0:
-		_t(Vector2(206, 500), Skills.FRUIT_DESC[h.fruits[0]], 12, Color(INK, 0.7))
+		draw_multiline_string(font, Vector2(206, 440), Skills.FRUIT_DESC[h.fruits[0]], HORIZONTAL_ALIGNMENT_LEFT, 116, 12, 2, Color(INK, 0.7))
 	if h.shield_hits > 0:
-		_t(Vector2(206, 516), "щит: %d" % h.shield_hits, 12, Color("9a8a10"))
+		_t(Vector2(206, 460), "щит: %d" % h.shield_hits, 12, Color("9a8a10"))
 
 
 func _draw_goals(h: Hero, fr: int) -> void:
-	Art.card(self, Rect2(10, 542, 320, 114), PANEL, fr + 3)
-	_t(Vector2(24, 566), "Цели героя", 16)
+	Art.card(self, Rect2(10, 486, 320, 104), PANEL, fr + 3)
+	_t(Vector2(24, 510), "Цели", 16)
 	var dead: bool = game.over == "hero_dead"
-	_goal(Vector2(24, 590), "Сломать пылесос", game.boss_defeated, dead)
-	var y := 614.0
+	_goal(Vector2(24, 534), "Сломать пылесос", game.boss_defeated, dead)
+	var y := 558.0
 	for q in h.quests:
 		var info: Dictionary = Meta.quest_by_key(q)
 		_goal(Vector2(24, y), String(info.get("name", q)), false, false)
 		y += 24.0
 	if h.quests.is_empty():
-		_t(Vector2(44, 614), "квесты появятся с третьего забега", 13, Color(INK, 0.5))
+		_t(Vector2(44, 558), "квесты появятся с третьего забега", 13, Color(INK, 0.5))
 
 func _hover_skill(keys: Array, gk: Array, h: Hero) -> String:
 	var p: Vector2 = game.paw["pos"]
 	for i in keys.size():
-		if p.distance_to(Vector2(42, 300 + i * 50)) < 21.0:
+		if p.distance_to(Vector2(42, 248 + i * 46)) < 21.0:
 			return keys[i]
-		if h.mods.has(keys[i]) and p.distance_to(Vector2(128, 300 + i * 50)) < 18.0:
+		if h.mods.has(keys[i]) and p.distance_to(Vector2(128, 248 + i * 46)) < 18.0:
 			return h.mods[keys[i]]
 	for i in gk.size():
-		if p.distance_to(Vector2(194, 300 + i * 50)) < 21.0:
+		if p.distance_to(Vector2(194, 248 + i * 46)) < 21.0:
 			return gk[i]
 	return ""
 
@@ -351,7 +351,7 @@ func _draw_top(h: Hero, fr: int) -> void:
 	else:
 		Art.text_c(self, font, Vector2(x + 170, 58), "сломан", 36, Color("4f8f3a"))
 	var nxt: float = game.next_horde - game.time
-	Art.text_c(self, font, Vector2(x + 170, 106), "Орда: ур. %d · +%d%% от уровня Кеши · гонг %s" % [game.horde_level, int(round(game.HORDE_HP_LEVEL * 100.0 * float(h.level - 1))), mmss(nxt)], 14, Color("3f6fb5"))
+	Art.text_c(self, font, Vector2(x + 170, 106), "Орда ур. %d · гонг через %s" % [game.horde_level, mmss(nxt)], 14, Color("3f6fb5"))
 	var hero_p := h.power() * 2.0 + float(h.level)
 	var horde_p: float = float(game.horde_level) * 4.0 + game.player_damage / 20.0 + 2.0
 	var k: float = hero_p / (hero_p + horde_p)
@@ -365,12 +365,12 @@ func _draw_top(h: Hero, fr: int) -> void:
 
 func _draw_thoughts(fr: int) -> void:
 	var x := RIGHT.position.x
-	Art.card(self, Rect2(x + 10, 168, 320, 360), PANEL, fr + 6)
-	_t(Vector2(x + 24, 194), "Мысли героя", 16)
+	Art.card(self, Rect2(x + 10, 168, 320, 196), PANEL, fr + 6)
+	_t(Vector2(x + 24, 194), "Мысли", 16)
 	var y := 220.0
 	var i := 0
 	for th in game.thoughts:
-		if y > 512.0:
+		if y > 350.0 or i >= 5:
 			break
 		var a := 1.0 - i * 0.07
 		var s: String = th["text"]
@@ -397,9 +397,9 @@ func _draw_buttons(h: Hero, fr: int) -> void:
 		if game.ability_visible(k):
 			vis.append(k)
 	var height := 50.0 + vis.size() * 74.0
-	Art.card(self, Rect2(x + 10, 536, 320, height), PANEL, fr + 7)
-	_t(Vector2(x + 24, 560), "Ваши руки", 16)
-	var y := 572.0
+	Art.card(self, Rect2(x + 10, 372, 320, height), PANEL, fr + 7)
+	_t(Vector2(x + 24, 396), "Ваши руки", 16)
+	var y := 408.0
 	for k in vis:
 		var dx := _slide("btn_" + k, true, false)
 		draw_set_transform(Vector2(dx, 0))
@@ -651,7 +651,7 @@ func _draw_parrot_meta(t: float) -> void:
 		else:
 			Art.text_c(self, font, br.get_center() + Vector2(0, 6), "? из яйца", 14, Color(INK, 0.4))
 		bx += 210
-	y += 62
+	y += 70
 	var breason := String(Parrots.data(meta).get("reason", ""))
 	if breason != "" and Parrots.owned(meta).size() > 1:
 		_t(Vector2(x, y + 6), breason, 14, Color(INK, 0.65))
@@ -707,7 +707,7 @@ func _draw_parrot_meta(t: float) -> void:
 	var names: Array[String] = []
 	for k in known:
 		names.append(String(Skills.NAMES.get(k, k)))
-	_t(Vector2(x, y + 14), "Умения попугая: " + ", ".join(names), 15)
+	draw_multiline_string(font, Vector2(x, y + 14), "Умения попугая: " + ", ".join(names), HORIZONTAL_ALIGNMENT_LEFT, 600, 15, 2, INK)
 	var locked := 0
 	for sk in Meta.PARROT_SKILLS:
 		if not known.has(sk["key"]):
@@ -1147,8 +1147,8 @@ func _draw_hq_trees(meta: Dictionary, feathers: int, mp: Vector2) -> void:
 		var open := Trees.tree_open(meta, ab)
 		if not open:
 			# закрытые деревья: видно только ближайшее, остальные — силуэтом
-			Art.card(self, cr, Color(0.9, 0.88, 0.84), Art.frame() + 60 + i, Color(INK, 0.35), 1.5)
 			if not teaser_shown:
+				Art.card(self, cr, Color(0.9, 0.88, 0.84), Art.frame() + 60 + i, Color(INK, 0.35), 1.5)
 				teaser_shown = true
 				Art.text_c(self, font, cr.get_center() + Vector2(0, -6), "???", 22, Color(INK, 0.4))
 				Art.text_c(self, font, cr.get_center() + Vector2(0, 18), "после %d улучшений" % int(Trees.OPEN_AT[ab]), 13, Color(INK, 0.5))

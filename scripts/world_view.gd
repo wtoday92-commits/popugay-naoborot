@@ -832,7 +832,7 @@ func _draw_focus() -> void:
 			s = 48.0
 		elif o.has("life") and not o.has("big"):
 			s = 26.0
-		_brackets(p, s, C_FOCUS)
+		_brackets(p, s, Color(C_FOCUS, 0.55))
 
 
 func _brackets(p: Vector2, s: float, col: Color) -> void:
@@ -840,8 +840,8 @@ func _brackets(p: Vector2, s: float, col: Color) -> void:
 	for sx in [-1.0, 1.0]:
 		for sy in [-1.0, 1.0]:
 			var c := p + Vector2(sx * s, sy * s)
-			draw_line(c, c - Vector2(sx * l, 0), col, 2.0, true)
-			draw_line(c, c - Vector2(0, sy * l), col, 2.0, true)
+			draw_line(c, c - Vector2(sx * l, 0), col, 1.6, true)
+			draw_line(c, c - Vector2(0, sy * l), col, 1.6, true)
 
 
 func _draw_overhead() -> void:
@@ -849,6 +849,9 @@ func _draw_overhead() -> void:
 	if not game.levelup.is_empty() or game.over != "" or game.phase == "intro":
 		return
 	var label: String = Hero.MODE_NAMES[h.mode]
+	# фарм — обычное состояние, его не подписываем, чтобы не шуметь
+	if h.mode == Hero.Mode.FARM:
+		label = ""
 	if h.dodging:
 		label = "уворот!"
 	elif h.trapped > 0.0:
@@ -861,6 +864,8 @@ func _draw_overhead() -> void:
 		label = "оглушён"
 	elif h.eat_t > 0.0:
 		label = "ням!"
+	if label == "":
+		return
 	var size := 15
 	var w := Art.text_w(font, label, size) + 16.0
 	var c := h.pos + Vector2(0, -86)

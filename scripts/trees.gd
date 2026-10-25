@@ -313,14 +313,29 @@ static func toggle_enh(meta: Dictionary, ab: String) -> void:
 			e.pop_front()
 
 
+## Составы: обычные и по одному на каждый выбитый юнит.
+static func all_packs(meta: Dictionary) -> Array:
+	var out: Array = PACKS.duplicate()
+	for u in Units.LIST:
+		if Units.owned(meta).has(u["key"]):
+			out.append({"key": "u_" + u["key"], "name": u["plural"], "desc": u["desc"], "cost": 0, "cond": [], "unit": true})
+	return out
+
+
 static func pack(key: String) -> Dictionary:
 	for p in PACKS:
 		if p["key"] == key:
 			return p
+	if key.begins_with("u_"):
+		var u := Units.by_key(key.substr(2))
+		if not u.is_empty():
+			return {"key": key, "name": u["plural"], "desc": u["desc"], "cost": 0, "cond": [], "unit": true}
 	return PACKS[0]
 
 
 static func pack_owned(meta: Dictionary, key: String) -> bool:
+	if key.begins_with("u_"):
+		return Units.owned(meta).has(key.substr(2))
 	return hq(meta)["packs"].has(key)
 
 

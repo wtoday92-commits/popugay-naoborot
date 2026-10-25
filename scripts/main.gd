@@ -35,10 +35,12 @@ const MILLET_CD := 30.0
 const PAW_PUSH_R := 1.5 * M
 const PAW_HIT_R := 26.0
 const PAW_PUSH_MAX := 12
-const PAW_BRUISE := 2.0
+const PAW_BRUISE := 0.4
+## Откат тарана: после удара лапка недолго отстаёт, а таранить снова можно только через 6 с.
+const RAM_CD := 6.0
 const PAW_BRUISED_SPEED := 380.0
 const GRAB_R := 28.0
-const THROW_CD := 4.5
+const THROW_CD := 6.0
 const MAX_ENEMIES := 160
 const MAX_GEMS := 400
 const CELL := 40.0
@@ -52,7 +54,8 @@ const MENU_DESC := {
 	"missile": "выбери направление",
 }
 
-const ENAMES := ["sock", "yarn", "slipper", "sprayer", "hand", "super", "dust", "box", "boss"]
+const ENAMES := ["sock", "yarn", "slipper", "sprayer", "hand", "super", "dust", "box", "boss",
+	"remote", "pillow", "ball", "cable", "alarm", "sponge", "car"]
 const EDEFS := [
 	{"name": "Носок", "hp": 14.0, "speed": 1.6, "dmg": 5.0, "r": 11.0, "push": 1.0, "xp": 1},
 	{"name": "Клубок", "hp": 9.0, "speed": 3.4, "dmg": 4.0, "r": 10.0, "push": 1.0, "xp": 1},
@@ -63,6 +66,13 @@ const EDEFS := [
 	{"name": "Пылевой зайчик", "hp": 10.0, "speed": 2.6, "dmg": 4.0, "r": 9.0, "push": 1.0, "xp": 1},
 	{"name": "Шкатулка", "hp": 80.0, "speed": 2.6, "dmg": 0.0, "r": 16.0, "push": 0.0, "xp": 0},
 	{"name": "Пылесос", "hp": 900.0, "speed": 1.1, "dmg": 13.0, "r": 56.0, "push": 0.0, "xp": 0},
+	{"name": "Пульт", "hp": 18.0, "speed": 1.2, "dmg": 6.0, "r": 12.0, "push": 1.0, "xp": 2},
+	{"name": "Подушка", "hp": 110.0, "speed": 0.7, "dmg": 7.0, "r": 22.0, "push": 0.1, "xp": 6},
+	{"name": "Мячик", "hp": 12.0, "speed": 4.5, "dmg": 6.0, "r": 9.0, "push": 1.0, "xp": 1},
+	{"name": "Провод", "hp": 45.0, "speed": 1.8, "dmg": 6.0, "r": 12.0, "push": 0.3, "xp": 3},
+	{"name": "Будильник", "hp": 35.0, "speed": 0.9, "dmg": 3.0, "r": 14.0, "push": 0.5, "xp": 3},
+	{"name": "Губка", "hp": 40.0, "speed": 1.4, "dmg": 4.0, "r": 13.0, "push": 0.8, "xp": 3},
+	{"name": "Заводная машинка", "hp": 30.0, "speed": 2.2, "dmg": 9.0, "r": 13.0, "push": 0.7, "xp": 3},
 ]
 
 var floor_rect := Rect2(372, 34, 1176, 1012)
@@ -143,6 +153,7 @@ var win_at := -1.0
 var paw := {"id": 0, "pos": Vector2(960, 700), "born": 0.0}
 var paw_vel := Vector2.ZERO
 var paw_bruise := 0.0
+var ram_cd := 0.0
 var paw_threat := false
 var paw_seen_until := -1.0
 var paw_trail: Array = []
@@ -355,6 +366,7 @@ func start_run() -> void:
 	millet_cd = 0.0
 	throw_cd = 0.0
 	paw_bruise = 0.0
+	ram_cd = 0.0
 	held_e = null
 	menu = {}
 	aim = {}
@@ -423,6 +435,10 @@ func start_run() -> void:
 				owned_c[c] = int(owned_c[c]) - 1
 				curses_on.append(c)
 		save["armed"] = []
+	if OS.get_cmdline_user_args().has("--units"):
+		for u in Units.LIST:
+			if not Units.owned(meta).has(u["key"]):
+				Units.owned(meta).append(u["key"])
 	perks = Trees.perks(meta)
 	twin_ready = true
 	twin_refill = false
@@ -592,6 +608,7 @@ func _step(delta: float) -> void:
 	wave_cd = maxf(0.0, wave_cd - delta)
 	millet_cd = maxf(0.0, millet_cd - delta)
 	throw_cd = maxf(0.0, throw_cd - delta)
+	ram_cd = maxf(0.0, ram_cd - delta)
 	combo_cd = maxf(0.0, combo_cd - delta)
 	if throw_cd <= 0.0 and twin_refill:
 		twin_ready = true
@@ -778,7 +795,7 @@ static func seg_dist(p: Vector2, a: Vector2, b: Vector2) -> float:
 
 
 func _check_ram(a: Vector2, b: Vector2, v: Vector2) -> void:
-	if time < RAM_UNLOCK or paw_bruise > 0.0 or hero.ram_immune > 0.0 or not levelup.is_empty():
+	if time < RAM_UNLOCK or paw_bruise > 0.0 or ram_cd > 0.0 or hero.ram_immune > 0.0 or not levelup.is_empty():
 		return
 	var spd := maxf(paw_vel.length(), v.length() * 0.7)
 	if spd < RAM_SPEED * (1.0 - pk("ram_easy")):
@@ -846,10 +863,12 @@ func apply_ram(dir: Vector2) -> void:
 	# «Двойной удар»: каждый второй таран не ушибает лапку
 	if has_pk("combo") and not combo_flip:
 		combo_flip = true
-		paw_bruise = 0.0
+		paw_bruise = PAW_BRUISE
+		ram_cd = 0.0
 	else:
 		combo_flip = false
-		paw_bruise = maxf(0.5, PAW_BRUISE - pk("ram_bruise"))
+		paw_bruise = PAW_BRUISE
+		ram_cd = maxf(3.0, RAM_CD - pk("ram_bruise")) * curse_cd()
 	rams += 1
 	pstat_add("rams")
 	shake = maxf(shake, 5.0)
@@ -861,7 +880,7 @@ func apply_ram(dir: Vector2) -> void:
 func _update_paw_threat() -> void:
 	var was := paw_threat
 	paw_threat = false
-	if time >= RAM_UNLOCK and paw_bruise <= 0.0 and held_e == null:
+	if time >= RAM_UNLOCK and paw_bruise <= 0.0 and ram_cd <= 0.0 and held_e == null:
 		var pp: Vector2 = paw["pos"]
 		var to_h := hero.pos - pp
 		var d := to_h.length()
@@ -1381,7 +1400,12 @@ func _director(delta: float) -> void:
 			spawn_acc -= interval
 		var t: int = Enemy.T.SOCK
 		var r := randf()
-		if r < spray_share:
+		var own_units := Units.owned(meta)
+		if pack.begins_with("u_") and randf() < 0.35:
+			t = int(Units.by_key(pack.substr(2))["type"])
+		elif own_units.size() > 0 and time > 30.0 and randf() < (0.3 if OS.get_cmdline_user_args().has("--units") else 0.04):
+			t = int(Units.by_key(own_units[randi() % own_units.size()])["type"])
+		elif r < spray_share:
 			t = Enemy.T.SPRAYER
 		elif r < spray_share + slip_share:
 			t = Enemy.T.SLIPPER
@@ -1578,6 +1602,10 @@ func _update_enemies(delta: float) -> void:
 			Enemy.T.DUST:
 				e.phase += delta * 6.0
 				dir = dir.rotated(sin(time * 5.0 + float(e.id)) * 0.5)
+			Enemy.T.REMOTE, Enemy.T.PILLOW, Enemy.T.BALL, Enemy.T.CABLE, Enemy.T.ALARM, Enemy.T.SPONGE, Enemy.T.CAR:
+				var r2 := _update_unit(e, delta, d, dir)
+				spd = r2[0]
+				dir = r2[1]
 			Enemy.T.SLIPPER:
 				e.phase = fmod(e.phase + delta * 1.4, 1.0)
 			Enemy.T.SPRAYER:
@@ -1731,6 +1759,114 @@ func _update_super(e: Enemy, delta: float, d: float, dir: Vector2) -> float:
 				e.ability_cd = 3.0
 			return 11.0 * M
 	return 0.0
+
+
+## Новые юниты комнаты. Возвращает [скорость, направление].
+func _update_unit(e: Enemy, delta: float, d: float, dir: Vector2) -> Array:
+	e.ability_cd -= delta
+	e.phase += delta
+	match e.type:
+		Enemy.T.REMOTE:
+			# пульт: мигает и переносится на пару метров к попугаю
+			if e.state == 1:
+				e.state_t -= delta
+				if e.state_t <= 0.0:
+					var to := resolve_circle(e.pos + dir * minf(3.0 * M, maxf(0.0, d - 1.5 * M)), e.radius)
+					add_fx({"kind": "poof", "pos": e.pos, "dur": 0.35, "col": Color("8fb6e8"), "r": 14.0})
+					e.pos = to
+					add_fx({"kind": "poof", "pos": to, "dur": 0.35, "col": Color("8fb6e8"), "r": 14.0})
+					e.state = 0
+					e.ability_cd = 4.0
+				return [0.0, dir]
+			if e.ability_cd <= 0.0 and d > 2.5 * M and e.stun <= 0.0:
+				e.state = 1
+				e.state_t = 0.45
+			return [e.speed, dir]
+		Enemy.T.PILLOW:
+			return [e.speed, dir]
+		Enemy.T.BALL:
+			# мячик летит по прямой и отражается от мебели и стен
+			if e.dash_dir == Vector2.ZERO:
+				e.dash_dir = dir.rotated(randf_range(-0.5, 0.5))
+			var nxt := e.pos + e.dash_dir * e.speed * delta * 1.2
+			if is_blocked(nxt) or not floor_rect.grow(-e.radius).has_point(nxt):
+				if is_blocked(Vector2(nxt.x, e.pos.y)) or not floor_rect.grow(-e.radius).has_point(Vector2(nxt.x, e.pos.y)):
+					e.dash_dir.x = -e.dash_dir.x
+				else:
+					e.dash_dir.y = -e.dash_dir.y
+				sfx("bounce", -16.0, 1.6)
+			# слегка подкручивает к попугаю, чтобы не носиться впустую
+			e.dash_dir = e.dash_dir.lerp(dir, delta * 0.15).normalized()
+			return [e.speed, e.dash_dir]
+		Enemy.T.CABLE:
+			e.trail.push_front(e.pos)
+			if e.trail.size() > 14:
+				e.trail.pop_back()
+			if e.state == 1:
+				e.state_t -= delta
+				if e.state_t <= 0.0:
+					e.state = 0
+					e.ability_cd = 5.0
+					add_fx({"kind": "zap", "pos": e.pos, "pts": PackedVector2Array([e.pos, hero.pos if d < 2.2 * M else e.pos + dir * 2.2 * M]), "dur": 0.25})
+					sfx("chime", -10.0, 0.6)
+					if d < 2.2 * M:
+						hero.take_damage(8.0 * (1.0 + 0.06 * float(horde_level - 1)), "cable", src_label(e), e.from_player)
+						hero.stun = maxf(hero.stun, 0.4)
+				return [0.0, dir]
+			if e.ability_cd <= 0.0 and d < 2.4 * M and e.stun <= 0.0:
+				e.state = 1
+				e.state_t = 0.6
+			return [e.speed, dir.rotated(sin(e.phase * 4.0) * 0.6)]
+		Enemy.T.ALARM:
+			# будильник держится на расстоянии и раз в 7 с звонит: орда вокруг ускоряется
+			if e.ability_cd <= 0.0 and e.stun <= 0.0:
+				e.ability_cd = 7.0
+				e.state_t = 0.8
+				for o in enemies_near(e.pos, 4.0 * M, 40):
+					if o != e and not o.is_big():
+						o.rush = 2.5
+						o.rush_k = 1.5
+				add_fx({"kind": "ring", "pos": e.pos, "r": 4.0 * M, "dur": 0.5, "color": Color(0.9, 0.35, 0.25, 0.8)})
+				sfx("jingle", -8.0, 1.4)
+			e.state_t = maxf(0.0, e.state_t - delta)
+			if d < 5.0 * M:
+				return [e.speed, -dir]
+			return [e.speed if d > 6.0 * M else 0.0, dir]
+		Enemy.T.SPONGE:
+			# губка лечит врагов вокруг и не лезет вперёд
+			for o in enemies_near(e.pos, 3.0 * M, 20):
+				if o != e and not o.is_big() and o.hp < o.max_hp:
+					o.hp = minf(o.max_hp, o.hp + 6.0 * delta)
+			if int(e.phase * 2.0) != int((e.phase - delta) * 2.0):
+				add_fx({"kind": "heal", "pos": e.pos, "dur": 0.6})
+			if d < 4.0 * M:
+				return [e.speed, -dir]
+			return [e.speed if d > 5.0 * M else 0.0, dir]
+		Enemy.T.CAR:
+			# машинка кружит, прицеливается и врезается с разгона
+			match e.state:
+				1:
+					e.state_t -= delta
+					if e.state_t <= 0.0:
+						e.state = 2
+						e.state_t = 0.6
+						sfx("dash", -10.0, 1.5)
+					return [0.0, e.dash_dir]
+				2:
+					e.state_t -= delta
+					if e.state_t <= 0.0:
+						e.state = 0
+						e.ability_cd = 5.0
+					return [12.0 * M, e.dash_dir]
+			if e.ability_cd <= 0.0 and d < 6.0 * M and e.stun <= 0.0:
+				e.state = 1
+				e.state_t = 0.6
+				e.dash_dir = dir
+				return [0.0, dir]
+			var side := dir.orthogonal() * (1.0 if e.id % 2 == 0 else -1.0)
+			var radial := dir * (1.0 if d > 4.0 * M else -0.6)
+			return [e.speed, (side + radial).normalized()]
+	return [e.speed, dir]
 
 
 ## Робот-пылесос: ползёт к попугаю и раз в несколько секунд сам выбирает умение:
@@ -1923,8 +2059,15 @@ func _kill(e: Enemy) -> void:
 	add_fx({"kind": "poof", "pos": e.pos, "dur": 0.35, "col": Color("f1eee8"), "r": e.radius})
 	sfx("pop", -12.0, randf_range(0.8, 1.3))
 	match e.type:
-		Enemy.T.SOCK, Enemy.T.DUST:
+		Enemy.T.SOCK, Enemy.T.DUST, Enemy.T.BALL:
 			_drop_gem(e.pos, false)
+		Enemy.T.REMOTE, Enemy.T.CABLE, Enemy.T.ALARM, Enemy.T.SPONGE, Enemy.T.CAR:
+			_drop_gem(e.pos, true)
+		Enemy.T.PILLOW:
+			_drop_gem(e.pos, true)
+			_drop_gem(e.pos + Vector2(12, 6), true)
+			# облако пуха: попугай вязнет
+			_add_zone(e.pos, 1.8 * M, "fluff", 5.0)
 		Enemy.T.YARN:
 			if randf() < 0.6:
 				_drop_gem(e.pos, false)
@@ -2224,6 +2367,8 @@ func _update_zones(delta: float) -> void:
 		if hero.pos.distance_to(z["pos"]) < float(z["r"]):
 			if z["kind"] == "dust":
 				hero.slow(0.2, 0.35)
+			elif z["kind"] == "fluff":
+				hero.slow(0.2, 0.45)
 			elif z["kind"] == "sparks":
 				hero.add_dot(6.0, 0.6, "Искры пылесоса")
 	zones = zones.filter(func(z): return float(z["t"]) < float(z["life"]))
@@ -2610,7 +2755,7 @@ func curse_cd() -> float:
 
 
 func throw_cd_full() -> float:
-	return maxf(2.5, THROW_CD - pk("throw_cd")) * curse_cd()
+	return maxf(3.5, THROW_CD - pk("throw_cd")) * curse_cd()
 
 
 func book_cd_full() -> float:
@@ -3035,9 +3180,10 @@ func _full_bot() -> void:
 	_build_grid()
 	if mid_bot and time >= _bot_ram and time > 10.0:
 		# таран: средний игрок попадает не всегда, а попугай уворачивается, если смотрит на лапку
-		_bot_ram = time + randf_range(6.0, 10.0)
-		if randf() < 0.6 and hero.ram_immune <= 0.0:
+		_bot_ram = time + randf_range(7.0, 11.0)
+		if randf() < 0.6 and hero.ram_immune <= 0.0 and ram_cd <= 0.0:
 			paw_bruise = PAW_BRUISE
+			ram_cd = RAM_CD
 			rams += 1
 			if hero.focus.size() < 3 or randf() < 0.5:
 				rams -= 1
@@ -3168,7 +3314,8 @@ func _begin_outro() -> void:
 	if not event.is_empty():
 		_end_event()
 	var player_won: bool = over == "hero_dead"
-	var feathers := Meta.feathers_for(player_damage, events_denied, player_won) + int(Diff.level(diff)["feathers"])
+	# перья: только из рулетки яйца или те, что роняет улетающий попугай
+	var feathers := 0 if player_won else Meta.feathers_for(player_damage, events_denied, player_won)
 	_save_run(feathers)
 	if sim:
 		return
@@ -3266,12 +3413,11 @@ func _outro_click(p: Vector2) -> void:
 		it["got"] = true
 		if it["kind"] == "egg":
 			# яйцо — рулетка: слева награда игроку, справа попугаю, цвет — редкость
-			save["feathers"] = int(save.get("feathers", 0)) + int(outro["feathers"])
-			var a := Rewards.roll_player(save)
+			var a := Rewards.roll_player(save, meta, diff)
 			var b := Rewards.roll_parrot(meta)
 			Rewards.apply_player(save, a)
 			Rewards.apply_parrot(meta, b)
-			outro["roll"] = {"t": 0.0, "left": a, "right": b, "lreel": Rewards.reel(a, "player"), "rreel": Rewards.reel(b, "parrot"), "tick": [0, 0], "stopped": [false, false]}
+			outro["roll"] = {"t": 0.0, "left": a, "right": b, "lreel": Rewards.reel(a, "player", Rewards.curses_open(meta)), "rreel": Rewards.reel(b, "parrot"), "tick": [0, 0], "stopped": [false, false]}
 			var rw: Array = save.get("rewards", [])
 			rw.append({"hero": b["label"], "player": a["label"]})
 			save["rewards"] = rw.slice(maxi(0, rw.size() - 30))
@@ -3390,7 +3536,7 @@ func _save_run(feathers: int) -> void:
 		save["feathers"] = int(save.get("feathers", 0)) + feathers
 		if over == "hero_dead":
 			# яйцо в прогоне открывается само
-			var ra := Rewards.roll_player(save)
+			var ra := Rewards.roll_player(save, meta, diff)
 			var rb := Rewards.roll_parrot(meta)
 			Rewards.apply_player(save, ra)
 			Rewards.apply_parrot(meta, rb)
@@ -3493,7 +3639,7 @@ func buy_pack(key: String) -> bool:
 func _cycle_slot(i: int, dir: int) -> void:
 	var h := Trees.hq(meta)
 	var owned: Array = []
-	for pkk in Trees.PACKS:
+	for pkk in Trees.all_packs(meta):
 		if Trees.pack_owned(meta, pkk["key"]):
 			owned.append(pkk["key"])
 	var cur: int = owned.find(h["waves"][i])

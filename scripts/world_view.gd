@@ -5,9 +5,9 @@ extends Node2D
 
 const INK := Art.INK
 const M := 40.0
-const C_FLOOR := Color("f1e6d2")
-const C_PLANK := Color("e3d3b8")
-const C_WALL := Color("cdb89c")
+const C_FLOOR := Color("e6d3b2")
+const C_PLANK := Color("d3bc96")
+const C_WALL := Color("b49d7c")
 const C_GREEN := Color("7cc46a")
 const C_WING := Color("58a04c")
 const C_YELLOW := Color("f6d84c")
@@ -162,8 +162,8 @@ func _draw_room(fr: int) -> void:
 		y += 48.0
 		row += 1
 	# ковёр плоский: тонкая линия, без объёма
-	Art.blob(self, game.rug_pos, 250, 150, Color("eddcea"), 1.5, 7, 0.0, Color("cdb6cc"), 0.02)
-	Art.blob(self, game.rug_pos, 195, 108, Color("f3e6f0"), 1.0, 9, 0.0, Color("dcc8da"), 0.02)
+	Art.blob(self, game.rug_pos, 250, 150, Color("dccadb"), 1.5, 7, 0.0, Color("bea6bb"), 0.02)
+	Art.blob(self, game.rug_pos, 195, 108, Color("e5d6e3"), 1.0, 9, 0.0, Color("ccb6c9"), 0.02)
 	Art.outline(self, Art.wobbly_rect(f, fr, 1.0), INK, 3.5)
 	# плинтус
 	draw_rect(Rect2(f.position.x, f.position.y, f.size.x, 6), Color("b7a283"))
@@ -418,6 +418,20 @@ func _draw_enemy(e: Enemy, fr: int) -> void:
 			_draw_box(e, sd)
 		Enemy.T.BOSS:
 			_draw_boss(e, sd)
+		Enemy.T.REMOTE, Enemy.T.PILLOW, Enemy.T.BALL, Enemy.T.CABLE, Enemy.T.ALARM, Enemy.T.SPONGE, Enemy.T.CAR:
+			var key: String = game.ENAMES[e.type]
+			if e.type == Enemy.T.CABLE and e.trail.size() > 1:
+				# провод: хвост тянется за вилкой
+				var pts := PackedVector2Array()
+				for q in e.trail:
+					pts.append(q)
+				draw_polyline(pts, INK, 7.0, true)
+				draw_polyline(pts, Color("3a3a44"), 4.0, true)
+			var st := e.state
+			if e.type == Enemy.T.ALARM:
+				st = 1 if e.state_t > 0.0 else 0
+			var tint := Color(1, 1, 1, 0.7) if e.flash > 0.0 else Color(1, 1, 1, 0)
+			UnitArt.draw(self, key, p, 1.0, _time + float(e.id), st, e.move_dir if e.type != Enemy.T.CAR or e.state == 0 else e.dash_dir, tint)
 	if e.shield > 0:
 		# броня тапка: голубой полукруг-щиток
 		draw_arc(p, e.radius + 6.0, PI * 1.05, PI * 1.95, 12, Color(0.35, 0.55, 0.85, 0.95), 4.0, true)
@@ -1087,6 +1101,13 @@ func _draw_zone(z: Dictionary, fr: int) -> void:
 	var p: Vector2 = z["pos"]
 	var r: float = z["r"]
 	var k := clampf(float(z["t"]) / 0.3, 0.0, 1.0) * (1.0 - clampf((float(z["t"]) - float(z["life"]) + 0.6) / 0.6, 0.0, 1.0))
+	if z["kind"] == "fluff":
+		Art.fill_blob(self, p, r, r * 0.8, Color(0.97, 0.94, 0.98, 0.55 * k), int(z["id"]))
+		for i in 7:
+			var a := float(z["id"]) + i * 0.9 + _time * 0.4
+			var q := p + Vector2(cos(a), sin(a)) * r * 0.6
+			Art.blob(self, q, 3.0, 7.0, Color(1, 1, 1, 0.9 * k), 1.0, i, a)
+		return
 	if z["kind"] == "dust":
 		Art.fill_blob(self, p, r, r * 0.8, Color(0.62, 0.56, 0.5, 0.28 * k), int(z["id"]))
 		for i in 4:
@@ -1205,6 +1226,11 @@ func _draw_fx(f: Dictionary, fr: int) -> void:
 			var q := p - Vector2(0, (1.0 - k) * 140.0)
 			Icons._star(self, q, 9.0, Color("ffe36a"), 1.0)
 			Art.fill_blob(self, p, 10.0 * k, 4.0 * k, Color(1.0, 0.9, 0.4, 0.4))
+		"heal":
+			for j in 3:
+				var q := p + Vector2(-10 + j * 10, -14 - 20.0 * k)
+				draw_line(q - Vector2(4, 0), q + Vector2(4, 0), Color(0.3, 0.75, 0.3, 1.0 - k), 2.5)
+				draw_line(q - Vector2(0, 4), q + Vector2(0, 4), Color(0.3, 0.75, 0.3, 1.0 - k), 2.5)
 		"miss":
 			Art.text_c(self, font, p + Vector2(0, -18 - 14.0 * k), "мимо", 14, Color(0.4, 0.4, 0.45, 1.0 - k), Color(1, 1, 1, 0.7 * (1.0 - k)), 4)
 		"stamp":

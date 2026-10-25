@@ -72,7 +72,7 @@ static func mmss(t: float) -> String:
 func _draw() -> void:
 	if game == null or game.hero == null:
 		return
-	var fr := Art.frame()
+	var fr := 0
 	var h: Hero = game.hero
 	draw_rect(LEFT, STRIP)
 	draw_rect(RIGHT, STRIP)
@@ -406,9 +406,7 @@ func _draw_buttons(h: Hero, fr: int) -> void:
 		_ability(k, Vector2(x + 20, y), edge)
 		draw_set_transform(Vector2.ZERO)
 		y += 74.0
-	_t(Vector2(x + 24, 990), "Пробел пауза · M звук · R заново", 13, Color(INK, 0.6))
-	_t(Vector2(x + 24, 1010), "F2 ускорить ×3 · F3 мысли ИИ", 13, Color(INK, 0.6))
-	_t(Vector2(x + 24, 1030), "Esc отмена меню", 13, Color(INK, 0.6))
+	_t(Vector2(x + 24, 1040), "Пробел — пауза и клавиши", 13, Color(INK, 0.45))
 
 
 func _ability(k: String, p: Vector2, edge: bool) -> void:
@@ -422,8 +420,8 @@ func _ability(k: String, p: Vector2, edge: bool) -> void:
 			cd = game.throw_cd
 			cd_max = game.THROW_CD
 		"ram":
-			cd = game.paw_bruise
-			cd_max = game.PAW_BRUISE
+			cd = game.ram_cd
+			cd_max = game.RAM_CD
 			if not on:
 				sub = "откроется через %s" % mmss(game.RAM_UNLOCK - game.time)
 		"millet":
@@ -448,12 +446,12 @@ func _button(p: Vector2, icon: String, title: String, key: String, sub: String, 
 	var r := Rect2(p, Vector2(300, 66))
 	var ready := unlocked and cd <= 0.0
 	var fill := Color(1, 0.97, 0.9) if ready else Color(0.9, 0.88, 0.84)
-	Art.card(self, r, fill, Art.frame() + icon.hash() % 31, INK, 2.0)
+	Art.card(self, r, fill, 0 + icon.hash() % 31, INK, 2.0)
 	if not ready and unlocked and cd_max > 0.0:
 		draw_rect(Rect2(r.position + Vector2(3, 3), Vector2((r.size.x - 6) * (1.0 - cd / cd_max), r.size.y - 6)), Color(0.6, 0.5, 0.85, 0.18))
 	if glow and ready:
 		var a := 0.5 + 0.5 * sin(Time.get_ticks_msec() * 0.012)
-		Art.outline(self, Art.wobbly_rect(r.grow(4), Art.frame() + 5, 1.0), Color(0.9, 0.3, 0.2, a), 3.0)
+		Art.outline(self, Art.wobbly_rect(r.grow(4), 0 + 5, 1.0), Color(0.9, 0.3, 0.2, a), 3.0)
 	Icons.draw(self, icon, r.position + Vector2(34, 33), 50.0, 1.0 if unlocked else 0.4)
 	_t(r.position + Vector2(68, 26), title, 17, INK if unlocked else Color(INK, 0.5))
 	var kw := Art.text_w(font, key, 13) + 12.0
@@ -476,7 +474,7 @@ func _draw_event_card(f: Dictionary) -> void:
 	var sc := 0.7 + 0.3 * (1.0 - pow(1.0 - k, 3.0))
 	var c := Vector2(960, 290)
 	var r := Rect2(c - Vector2(260, 80) * sc, Vector2(520, 160) * sc)
-	Art.card(self, r, Color(1, 0.95, 0.8, 0.97 * a), Art.frame(), Color(INK, a), 3.0)
+	Art.card(self, r, Color(1, 0.95, 0.8, 0.97 * a), 0, Color(INK, a), 3.0)
 	for i in 10:
 		var ang := TAU * i / 10.0 + Time.get_ticks_msec() * 0.001
 		Icons._star(self, c + Vector2(cos(ang) * 290.0, sin(ang) * 100.0) * sc, 6.0, Color("f6d84c"), a)
@@ -531,10 +529,13 @@ func _frame(f: Rect2, col: Color, w: float) -> void:
 
 func _overlay(title: String, sub: String) -> void:
 	draw_rect(game.FIELD, Color(0.2, 0.15, 0.1, 0.35))
-	var r := Rect2(720, 470, 480, 140)
-	Art.card(self, r, PANEL, Art.frame())
-	Art.text_c(self, font, Vector2(960, 528), title, 38, INK)
-	Art.text_c(self, font, Vector2(960, 572), sub, 17, Color(INK, 0.7))
+	var r := Rect2(700, 430, 520, 230)
+	Art.card(self, r, PANEL, 0)
+	Art.text_c(self, font, Vector2(960, 488), title, 38, INK)
+	Art.text_c(self, font, Vector2(960, 530), sub, 17, Color(INK, 0.7))
+	var lines := ["R — заново · F2 — ускорить ×3", "F3 — мысли ИИ · Esc — отмена меню", "Q — книга · W — клетка"]
+	for i in lines.size():
+		Art.text_c(self, font, Vector2(960, 572 + i * 26), lines[i], 15, Color(INK, 0.6))
 
 
 func _draw_end() -> void:
@@ -558,7 +559,7 @@ const META_PARROT := Rect2(975, 40, 920, 960)
 const META_PLAYER := Rect2(25, 40, 920, 960)
 const NEW_RUN := Rect2(810, 1010, 300, 56)
 const CHEST_BTN := Rect2(500, 1010, 290, 56)
-const CHEST := Rect2(460, 250, 1000, 560)
+const CHEST := Rect2(410, 150, 1100, 780)
 
 
 func _meta_t() -> float:
@@ -583,16 +584,16 @@ func _draw_meta() -> void:
 		for k in ch:
 			n_curses += int(ch[k])
 		var hc: bool = CHEST_BTN.has_point(game.paw["pos"])
-		Art.card(self, CHEST_BTN, Color(1, 0.93, 0.7) if hc or chest_open else PANEL, Art.frame() + 7, INK, 2.5)
+		Art.card(self, CHEST_BTN, Color(1, 0.93, 0.7) if hc or chest_open else PANEL, 0 + 7, INK, 2.5)
 		var armed: Array = game.save.get("armed", [])
-		var lbl := "Сундук" + (" · проклятий %d" % n_curses if n_curses > 0 else "")
+		var lbl := "Сундук" + (" · проклятий %d" % n_curses if n_curses > 0 and Rewards.curses_open(game.meta) else "")
 		if armed.size() > 0:
 			lbl = "Сундук · взято %d" % armed.size()
 		Art.text_c(self, font, CHEST_BTN.get_center() + Vector2(0, 7), lbl, 18, INK)
 		if chest_open:
 			_draw_chest()
 		var hov: bool = NEW_RUN.has_point(game.paw["pos"])
-		Art.card(self, NEW_RUN, Color(1, 0.93, 0.7) if hov else PANEL, Art.frame(), INK, 3.0)
+		Art.card(self, NEW_RUN, Color(1, 0.93, 0.7) if hov else PANEL, 0, INK, 3.0)
 		Art.text_c(self, font, NEW_RUN.get_center() + Vector2(0, 8), "Новый забег  [R]", 22, INK)
 
 
@@ -603,7 +604,7 @@ static func _ease(k: float) -> float:
 
 func _draw_parrot_meta(t: float) -> void:
 	var r := META_PARROT
-	Art.card(self, r, PANEL, Art.frame(), INK, 3.0)
+	Art.card(self, r, PANEL, 0, INK, 3.0)
 	var meta: Dictionary = game.meta
 	var last: Dictionary = meta.get("last", {})
 	var x := r.position.x + 30
@@ -624,10 +625,10 @@ func _draw_parrot_meta(t: float) -> void:
 		var cr := Rect2(x + d * 150, y, 140, 34)
 		var open := d <= top
 		var cur := d == nd
-		Art.card(self, cr, Color(lv["color"], 0.25) if cur else (PANEL if open else Color(0.9, 0.88, 0.84)), Art.frame() + 100 + d, INK if open else Color(INK, 0.35), 2.5 if cur else 1.4)
+		Art.card(self, cr, Color(lv["color"], 0.25) if cur else (PANEL if open else Color(0.9, 0.88, 0.84)), 0 + 100 + d, INK if open else Color(INK, 0.35), 2.5 if cur else 1.4)
 		Art.text_c(self, font, cr.get_center() + Vector2(0, 6), String(lv["name"]) if open else "???", 15, INK if open else Color(INK, 0.4))
 	var kc := Rect2(x + 450, y, 140, 34)
-	Art.card(self, kc, Color(0.9, 0.88, 0.84), Art.frame() + 104, Color(INK, 0.35), 1.4)
+	Art.card(self, kc, Color(0.9, 0.88, 0.84), 0 + 104, Color(INK, 0.35), 1.4)
 	Art.text_c(self, font, kc.get_center() + Vector2(0, 6), "Кухня · скоро", 14, Color(INK, 0.4))
 	y += 56
 	var dmsg := String(last.get("diff_msg", ""))
@@ -643,7 +644,7 @@ func _draw_parrot_meta(t: float) -> void:
 		var have: bool = Parrots.owned(meta).has(b)
 		var br := Rect2(bx, y - 4, 200, 56)
 		var on: bool = b == nb
-		Art.card(self, br, Color(1, 0.93, 0.7) if on else (PANEL if have else Color(0.9, 0.88, 0.84)), Art.frame() + 110, INK if have else Color(INK, 0.3), 2.5 if on else 1.3)
+		Art.card(self, br, Color(1, 0.93, 0.7) if on else (PANEL if have else Color(0.9, 0.88, 0.84)), 0 + 110, INK if have else Color(INK, 0.3), 2.5 if on else 1.3)
 		if have:
 			_bird_icon(b, br.position + Vector2(30, 30), 44.0)
 			_t(br.position + Vector2(60, 24), String(Parrots.bird(b)["name"]), 15)
@@ -753,7 +754,7 @@ func _draw_parrot_meta(t: float) -> void:
 		var qr2 := Rect2(x + (i % 3) * 288, y + int(i / 3) * 92, 276, 82)
 		var chosen: bool = picked.has(offer[i]) and t > 1.8
 		var fill := Color(1, 0.93, 0.68) if chosen else Color(1, 0.98, 0.93)
-		Art.card(self, qr2, Color(fill, appear), Art.frame() + i, Color(INK, appear), 3.0 if chosen else 1.5)
+		Art.card(self, qr2, Color(fill, appear), 0 + i, Color(INK, appear), 3.0 if chosen else 1.5)
 		draw_multiline_string(font, qr2.position + Vector2(12, 26), String(q["name"]), HORIZONTAL_ALIGNMENT_LEFT, 252, 15, 2, Color(INK, appear))
 		_t(qr2.position + Vector2(12, 72), "+%d проса" % int(q["reward"]), 13, Color(0.55, 0.4, 0.1, appear))
 		if chosen:
@@ -765,7 +766,7 @@ func _draw_player_meta(t: float) -> void:
 		_draw_hq(t)
 		return
 	var r := META_PLAYER
-	Art.card(self, r, PANEL, Art.frame() + 3, INK, 3.0)
+	Art.card(self, r, PANEL, 0 + 3, INK, 3.0)
 	var x := r.position.x + 30
 	var y := r.position.y + 50
 	_t(Vector2(x, y), "Ваши исследования", 30)
@@ -795,7 +796,7 @@ func _draw_player_meta(t: float) -> void:
 			var can: bool = open and not have and feathers >= int(it["cost"])
 			var hov: bool = cr.has_point(game.paw["pos"])
 			var fill := Color(0.9, 0.97, 0.88) if have else (Color(1, 0.93, 0.7) if can and hov else (PANEL if open else Color(0.9, 0.88, 0.84)))
-			Art.card(self, cr, fill, Art.frame() + tier * 3 + i, INK if open else Color(INK, 0.4), 2.5 if can else 1.8)
+			Art.card(self, cr, fill, 0 + tier * 3 + i, INK if open else Color(INK, 0.4), 2.5 if can else 1.8)
 			if open:
 				Icons.draw(self, it["icon"], cr.position + Vector2(48, cr.size.y * 0.5), 60.0, 1.0 if have or can else 0.6)
 				_t(cr.position + Vector2(92, 34), String(it["name"]), 19)
@@ -814,7 +815,7 @@ func _draw_player_meta(t: float) -> void:
 	else:
 		Art.text_c(self, font, Vector2(r.get_center().x, unlock_rect(2, 0).end.y + 30), "Всё исследовано: следующий экран — штаб с деревьями умений", 16, Color("8a5a1e"))
 	var tr := Rect2(r.position.x + 30, r.position.y + 760, 860, 150)
-	Art.card(self, tr, Color(0.9, 0.88, 0.84), Art.frame() + 40, Color(INK, 0.4), 1.8)
+	Art.card(self, tr, Color(0.9, 0.88, 0.84), 0 + 40, Color(INK, 0.4), 1.8)
 	Art.text_c(self, font, tr.get_center() + Vector2(0, -12), "Штаб", 26, Color(INK, 0.45))
 	Art.text_c(self, font, tr.get_center() + Vector2(0, 20), "откроется, когда попугай дойдёт до сложной комнаты и будут куплены все исследования выше", 15, Color(INK, 0.45))
 
@@ -841,7 +842,7 @@ func meta_click(p: Vector2, rmb: bool = false) -> String:
 			i += 1
 		i = 0
 		for k in Rewards.CURSES:
-			if chest_curse_rect(i).has_point(p):
+			if chest_curse_rect(i).has_point(p) and Rewards.curses_open(game.meta):
 				return "curse:" + k
 			i += 1
 		return ""
@@ -868,13 +869,17 @@ func chest_skin_rect(i: int) -> Rect2:
 	return Rect2(CHEST.position.x + 30 + i * 158, CHEST.position.y + 90, 146, 130)
 
 
+func chest_unit_rect(i: int) -> Rect2:
+	return Rect2(CHEST.position.x + 30 + i * 150, CHEST.position.y + 300, 140, 130)
+
+
 func chest_curse_rect(i: int) -> Rect2:
-	return Rect2(CHEST.position.x + 30 + (i % 3) * 316, CHEST.position.y + 300 + int(i / 3) * 110, 304, 98)
+	return Rect2(CHEST.position.x + 30 + (i % 3) * 346, CHEST.position.y + 520 + int(i / 3) * 110, 334, 98)
 
 
 func _draw_chest() -> void:
 	draw_rect(Rect2(0, 0, 1920, 1080), Color(0, 0, 0, 0.25))
-	Art.card(self, CHEST, PANEL, Art.frame() + 11, INK, 3.0)
+	Art.card(self, CHEST, PANEL, 0 + 11, INK, 3.0)
 	var save: Dictionary = game.save
 	var mp: Vector2 = game.paw["pos"]
 	_t(CHEST.position + Vector2(30, 50), "Лапка", 24)
@@ -886,16 +891,34 @@ func _draw_chest() -> void:
 		var r := chest_skin_rect(i)
 		var have: bool = own.has(k)
 		var on: bool = k == cur
-		Art.card(self, r, Color(1, 0.93, 0.7) if on else (PANEL if have else Color(0.9, 0.88, 0.84)), Art.frame() + 20 + i, INK if have else Color(INK, 0.35), 3.0 if on else 1.6)
+		Art.card(self, r, Color(1, 0.93, 0.7) if on else (PANEL if have else Color(0.9, 0.88, 0.84)), 0 + 20 + i, INK if have else Color(INK, 0.35), 3.0 if on else 1.6)
 		if have:
 			PawCursor.draw_paw(self, r.get_center() + Vector2(0, -6), PawCursor.SKINS[k], 0.0, false, 1.4)
 			Art.text_c(self, font, r.position + Vector2(r.size.x * 0.5, r.size.y - 12), String(PawCursor.SKINS[k]["name"]), 13, INK)
 		else:
 			Art.text_c(self, font, r.get_center() + Vector2(0, 8), "?", 30, Color(INK, 0.35))
 		i += 1
-	_t(CHEST.position + Vector2(30, 280), "Проклятия на следующий забег", 24)
+	# юниты: сверхредкая награда; ставить в состав орды можно со штабом
+	_t(CHEST.position + Vector2(30, 280), "Юниты", 24)
+	var hq: bool = Trees.hq_open(game.meta)
+	_t(CHEST.position + Vector2(140, 280), "сверхредкие, сами иногда приходят в волнах" + ("; расставлять — во вкладке «Волны» штаба" if hq else "; расставлять можно будет в штабе"), 15, Color(INK, 0.6))
+	var uo := Units.owned(game.meta)
+	for j in Units.LIST.size():
+		var u: Dictionary = Units.LIST[j]
+		var r2 := chest_unit_rect(j)
+		var have2: bool = uo.has(u["key"])
+		Art.card(self, r2, PANEL if have2 else Color(0.9, 0.88, 0.84), 0 + 40 + j, INK if have2 else Color(INK, 0.35), 1.6)
+		if have2:
+			UnitArt.draw(self, u["key"], r2.get_center() + Vector2(0, -12), 1.6, Time.get_ticks_msec() / 1000.0)
+			Art.text_c(self, font, r2.position + Vector2(r2.size.x * 0.5, r2.size.y - 12), String(u["name"]), 13, INK)
+		else:
+			Art.text_c(self, font, r2.get_center() + Vector2(0, 8), "?", 30, Color(INK, 0.35))
+	Art.text_c(self, font, Vector2(CHEST.get_center().x, CHEST.end.y - 18), "Клик мимо окна — закрыть", 14, Color(INK, 0.5))
+	if not Rewards.curses_open(game.meta):
+		return
+	_t(CHEST.position + Vector2(30, 500), "Проклятия на следующий забег", 24)
 	var armed: Array = save.get("armed", [])
-	_t(CHEST.position + Vector2(420, 280), "можно взять до %d, сгорают при старте" % Rewards.MAX_ARMED, 15, Color(INK, 0.6))
+	_t(CHEST.position + Vector2(420, 500), "можно взять до %d, сгорают при старте" % Rewards.MAX_ARMED, 15, Color(INK, 0.6))
 	var cs: Dictionary = save.get("curses", {})
 	i = 0
 	for k in Rewards.CURSES:
@@ -903,13 +926,12 @@ func _draw_chest() -> void:
 		var n := int(cs.get(k, 0))
 		var on: bool = armed.has(k)
 		var hov := r.has_point(mp)
-		Art.card(self, r, Color(0.88, 0.8, 1.0) if on else (Color(1, 0.96, 0.85) if hov and n > 0 else (PANEL if n > 0 else Color(0.9, 0.88, 0.84))), Art.frame() + 30 + i, INK if n > 0 else Color(INK, 0.35), 3.0 if on else 1.6)
+		Art.card(self, r, Color(0.88, 0.8, 1.0) if on else (Color(1, 0.96, 0.85) if hov and n > 0 else (PANEL if n > 0 else Color(0.9, 0.88, 0.84))), 0 + 30 + i, INK if n > 0 else Color(INK, 0.35), 3.0 if on else 1.6)
 		_curse_icon(r.position + Vector2(40, 49), 26.0, n > 0)
 		_t(r.position + Vector2(76, 34), String(Rewards.CURSES[k]["name"]), 17, INK if n > 0 else Color(INK, 0.45))
 		draw_multiline_string(font, r.position + Vector2(76, 56), String(Rewards.CURSES[k]["desc"]), HORIZONTAL_ALIGNMENT_LEFT, 214, 13, 2, Color(INK, 0.7 if n > 0 else 0.4))
 		_t(r.position + Vector2(232, 34), ("взято" if on else "×%d" % n), 15, Color("6a4fb3") if on else Color(INK, 0.6))
 		i += 1
-	Art.text_c(self, font, Vector2(CHEST.get_center().x, CHEST.end.y - 18), "Клик мимо окна — закрыть", 14, Color(INK, 0.5))
 
 
 func _curse_icon(c: Vector2, r: float, on: bool) -> void:
@@ -939,6 +961,8 @@ func _reward_icon(it: Dictionary, c: Vector2, sz: float) -> void:
 			Icons.draw(self, String(it["value"]), c, sz, 1.0)
 		"bird":
 			_bird_icon(String(it["value"]), c, sz)
+		"unit":
+			UnitArt.draw(self, String(it["value"]), c, sz / 34.0, Time.get_ticks_msec() / 1000.0)
 
 
 ## Портрет попугая для наград и экрана Кеши.
@@ -1022,8 +1046,6 @@ func _draw_roll(ro: Dictionary) -> void:
 			draw_rect(fr.grow(10.0 * (1.0 - burst)), Color(rc, 0.6 * (1.0 - burst)), false, 6.0)
 			Art.text_c(self, font, Vector2(cx, 640), String(Rewards.RARITY[r]["name"]).to_upper(), 28, rc, Color(0, 0, 0, 0.6), 6)
 			Art.text_c(self, font, Vector2(cx, 700), String(rw["label"]), 30, Color(1, 0.97, 0.9), Color(0, 0, 0, 0.6), 6)
-			if side == 0:
-				Art.text_c(self, font, Vector2(cx, 748), "и +%d перьев за забег" % int(game.outro.get("feathers", 0)), 20, Color(1, 0.97, 0.9, 0.75))
 			if r >= 2:
 				for j in 18:
 					var a2 := float(j) * 2.39
@@ -1066,7 +1088,7 @@ func hq_slot_rect(i: int) -> Rect2:
 
 
 func hq_pack_rect(i: int) -> Rect2:
-	return Rect2(META_PLAYER.position.x + 30 + (i % 2) * 432, META_PLAYER.position.y + 470 + int(i / 2) * 100, 422, 90)
+	return Rect2(META_PLAYER.position.x + 30 + (i % 3) * 288, META_PLAYER.position.y + 470 + int(i / 3) * 90, 278, 82)
 
 
 func _hq_click(p: Vector2, rmb: bool) -> String:
@@ -1081,9 +1103,10 @@ func _hq_click(p: Vector2, rmb: bool) -> String:
 			if hq_slot_rect(i).has_point(p):
 				return "slot:%d:%s" % [i, "prev" if rmb else "next"]
 		if not rmb:
-			for i in Trees.PACKS.size():
+			var packs := Trees.all_packs(game.meta)
+			for i in packs.size():
 				if hq_pack_rect(i).has_point(p):
-					return "pack:" + String(Trees.PACKS[i]["key"])
+					return "pack:" + String(packs[i]["key"])
 		return ""
 	if rmb:
 		return ""
@@ -1106,7 +1129,7 @@ func _hq_click(p: Vector2, rmb: bool) -> String:
 func _draw_hq(t: float) -> void:
 	var r := META_PLAYER
 	var meta: Dictionary = game.meta
-	Art.card(self, r, PANEL, Art.frame() + 3, INK, 3.0)
+	Art.card(self, r, PANEL, 0 + 3, INK, 3.0)
 	var x := r.position.x + 30
 	var y := r.position.y + 50
 	_t(Vector2(x, y), "Штаб", 30)
@@ -1125,7 +1148,7 @@ func _draw_hq(t: float) -> void:
 		var tr := hq_tab_rect(i)
 		var on := (i == 0 and hq_tab == "trees") or (i == 1 and hq_tab == "waves")
 		var avail := i == 0 or wopen
-		Art.card(self, tr, Color(1, 0.93, 0.7) if on else (PANEL if avail else Color(0.9, 0.88, 0.84)), Art.frame() + 50 + i, INK if avail else Color(INK, 0.4), 2.5 if on else 1.5)
+		Art.card(self, tr, Color(1, 0.93, 0.7) if on else (PANEL if avail else Color(0.9, 0.88, 0.84)), 0 + 50 + i, INK if avail else Color(INK, 0.4), 2.5 if on else 1.5)
 		var label := "Деревья умений" if i == 0 else ("Волны" if wopen else "Волны · после %d улучшений" % Trees.WAVES_AT)
 		Art.text_c(self, font, tr.get_center() + Vector2(0, 7), label, 18 if avail else 14, INK if avail else Color(INK, 0.5))
 	if hq_tab == "waves":
@@ -1148,14 +1171,14 @@ func _draw_hq_trees(meta: Dictionary, feathers: int, mp: Vector2) -> void:
 		if not open:
 			# закрытые деревья: видно только ближайшее, остальные — силуэтом
 			if not teaser_shown:
-				Art.card(self, cr, Color(0.9, 0.88, 0.84), Art.frame() + 60 + i, Color(INK, 0.35), 1.5)
+				Art.card(self, cr, Color(0.9, 0.88, 0.84), 0 + 60 + i, Color(INK, 0.35), 1.5)
 				teaser_shown = true
 				Art.text_c(self, font, cr.get_center() + Vector2(0, -6), "???", 22, Color(INK, 0.4))
 				Art.text_c(self, font, cr.get_center() + Vector2(0, 18), "после %d улучшений" % int(Trees.OPEN_AT[ab]), 13, Color(INK, 0.5))
 			continue
 		var sel := ab == hq_abil
 		var is_enh := enh.has(ab)
-		Art.card(self, cr, Color(1, 0.93, 0.7) if sel else PANEL, Art.frame() + 60 + i, INK, 3.0 if sel else 1.8)
+		Art.card(self, cr, Color(1, 0.93, 0.7) if sel else PANEL, 0 + 60 + i, INK, 3.0 if sel else 1.8)
 		Icons.draw(self, Trees.ABIL_ICON[ab], cr.position + Vector2(32, 34), 42.0, 1.0)
 		_t(cr.position + Vector2(8, 74), String(Trees.ABIL_NAMES[ab]), 15)
 		# звезда: усиленное на забег
@@ -1236,7 +1259,7 @@ func _draw_hq_trees(meta: Dictionary, feathers: int, mp: Vector2) -> void:
 				tip = [bi, ni]
 	# подсказка по узлу под курсором
 	var tr := Rect2(r.position.x + 30, r.position.y + 846, 860, 92)
-	Art.card(self, tr, Color(1, 0.98, 0.9), Art.frame() + 70, Color(INK, 0.6), 1.5)
+	Art.card(self, tr, Color(1, 0.98, 0.9), 0 + 70, Color(INK, 0.6), 1.5)
 	if tip.is_empty():
 		_t(tr.position + Vector2(14, 28), "Наведите на узел дерева. Ромб — ключевая пассивка, звезда — вершина ветки.", 15, Color(INK, 0.65))
 		_t(tr.position + Vector2(14, 54), "К ключевому узлу и вершине ведут два пути: хватит любого из боковых узлов.", 15, Color(INK, 0.65))
@@ -1279,28 +1302,29 @@ func _draw_hq_waves(meta: Dictionary, feathers: int, mp: Vector2) -> void:
 		var pkk: Dictionary = Trees.pack(h["waves"][i])
 		var hov := cr.has_point(mp)
 		var is_mix: bool = pkk["key"] == "mix"
-		Art.card(self, cr, Color(1, 0.93, 0.7) if hov else (PANEL if is_mix else Color(0.93, 0.9, 1.0)), Art.frame() + 80 + i, INK, 2.0)
+		Art.card(self, cr, Color(1, 0.93, 0.7) if hov else (PANEL if is_mix else Color(0.93, 0.9, 1.0)), 0 + 80 + i, INK, 2.0)
 		_t(cr.position + Vector2(12, 24), "%s–%s" % [mmss(i * 30.0), mmss(i * 30.0 + 30.0)], 14, Color(INK, 0.6))
 		_t(cr.position + Vector2(12, 52), String(pkk["name"]), 18)
 		draw_multiline_string(font, cr.position + Vector2(12, 74), String(pkk["desc"]), HORIZONTAL_ALIGNMENT_LEFT, 186, 12, 2, Color(INK, 0.65))
 	_t(Vector2(r.position.x + 30, r.position.y + 458), "Составы орды", 17)
-	for i in Trees.PACKS.size():
-		var pkk: Dictionary = Trees.PACKS[i]
+	var packs := Trees.all_packs(meta)
+	for i in packs.size():
+		var pkk: Dictionary = packs[i]
 		var cr := hq_pack_rect(i)
 		var own := Trees.pack_owned(meta, pkk["key"])
 		var cond_ok := Trees.cond_progress(meta, pkk["cond"]) >= 1.0
 		var can: bool = not own and cond_ok and feathers >= int(pkk["cost"])
 		var hov := cr.has_point(mp)
-		Art.card(self, cr, C_OWN if own else (C_CAN if can and hov else (PANEL if cond_ok else Color(0.9, 0.88, 0.84))), Art.frame() + 90 + i, INK if cond_ok or own else Color(INK, 0.45), 2.5 if can else 1.6)
-		_t(cr.position + Vector2(14, 28), String(pkk["name"]), 18, INK if cond_ok or own else Color(INK, 0.5))
-		draw_multiline_string(font, cr.position + Vector2(14, 50), String(pkk["desc"]), HORIZONTAL_ALIGNMENT_LEFT, 300, 13, 2, Color(INK, 0.7))
+		Art.card(self, cr, C_OWN if own else (C_CAN if can and hov else (PANEL if cond_ok else Color(0.9, 0.88, 0.84))), 0 + 90 + i, INK if cond_ok or own else Color(INK, 0.45), 2.5 if can else 1.6)
+		_t(cr.position + Vector2(12, 24), String(pkk["name"]), 16, INK if cond_ok or own else Color(INK, 0.5))
+		draw_multiline_string(font, cr.position + Vector2(12, 44), String(pkk["desc"]), HORIZONTAL_ALIGNMENT_LEFT, 256, 12, 2, Color(INK, 0.7))
 		var tag := "есть"
 		if not own:
 			tag = "%d перьев" % int(pkk["cost"])
 			if not cond_ok:
 				var cd: Array = pkk["cond"]
 				tag = "условие: %s (%d/%d)" % [String(cd[2]), mini(Trees.pstat(meta, cd[0]), int(cd[1])), int(cd[1])]
-		_t(cr.position + Vector2(14 if not cond_ok and not own else 300, 82), tag, 13, Color("4f8f3a") if own else (Color("8a5a1e") if can else Color(INK, 0.55)))
+		_t(cr.position + Vector2(12 if not cond_ok and not own else 210, 76), tag, 12, Color("4f8f3a") if own else (Color("8a5a1e") if can else Color(INK, 0.55)))
 
 
 func _shares_list(p: Vector2, d: Dictionary, names: Dictionary, col: Color) -> void:
@@ -1384,7 +1408,6 @@ func _draw_paw(fr: int) -> void:
 		draw_dashed_line(p, m, Color(INK, 0.35), 1.5, 6.0)
 		draw_circle(m, 3.0, Color(INK, 0.5))
 		PawCursor.draw_paw(self, p, sk, 1.0, true)
-		draw_arc(p, 30.0, -PI * 0.5, -PI * 0.5 + TAU * (1.0 - game.paw_bruise / game.PAW_BRUISE), 32, Color(0.85, 0.5, 0.2, 0.85), 5.0, true)
 		for k in 3:
 			var a := Time.get_ticks_msec() * 0.006 + k * TAU / 3.0
 			draw_circle(p + Vector2(cos(a) * 20.0, -24 + sin(a) * 6.0), 2.5, Color("f6cd56"))
@@ -1396,10 +1419,15 @@ func _draw_paw(fr: int) -> void:
 	# откат рогатки: кольцо вокруг лапки заполняется, пока не будет готово
 	if game.throw_cd > 0.0:
 		var k2: float = 1.0 - clampf(game.throw_cd / game.throw_cd_full(), 0.0, 1.0)
-		draw_arc(p, 30.0, 0, TAU, 32, Color(INK, 0.18), 5.0, true)
-		draw_arc(p, 30.0, -PI * 0.5, -PI * 0.5 + TAU * k2, 32, Color(0.42, 0.31, 0.7, 0.85), 5.0, true)
+		draw_arc(p, 32.0, 0, TAU, 32, Color(INK, 0.18), 4.0, true)
+		draw_arc(p, 32.0, -PI * 0.5, -PI * 0.5 + TAU * k2, 32, Color(0.42, 0.31, 0.7, 0.85), 4.0, true)
+	# таран: внутреннее кольцо поменьше, оранжевое
+	if game.ram_cd > 0.0 and game.time >= game.RAM_UNLOCK:
+		var k3: float = 1.0 - clampf(game.ram_cd / game.RAM_CD, 0.0, 1.0)
+		draw_arc(p + Vector2(0, 3), 22.0, 0, TAU, 28, Color(INK, 0.15), 3.0, true)
+		draw_arc(p + Vector2(0, 3), 22.0, -PI * 0.5, -PI * 0.5 + TAU * k3, 28, Color(0.88, 0.5, 0.15, 0.9), 3.0, true)
 	if game.throw_ready_flash > 0.0:
 		var f: float = game.throw_ready_flash / 0.45
 		draw_arc(p, 30.0 + 18.0 * (1.0 - f), 0, TAU, 32, Color(0.42, 0.31, 0.7, f), 4.0, true)
-	if game.paw_bruise <= 0.0 and game.time >= game.RAM_UNLOCK and game.paw_vel.length() > game.RAM_SPEED * (1.0 - game.pk("ram_easy")):
+	if game.paw_bruise <= 0.0 and game.ram_cd <= 0.0 and game.time >= game.RAM_UNLOCK and game.paw_vel.length() > game.RAM_SPEED * (1.0 - game.pk("ram_easy")):
 		draw_arc(p + Vector2(0, -2), 26.0, 0, TAU, 24, Color(0.42, 0.31, 0.7, 0.6), 2.5, true)

@@ -7,6 +7,7 @@ const RARITY := [
 	{"key": "rare", "name": "Редкая", "col": Color("3f8fd8"), "w": 27.0},
 	{"key": "epic", "name": "Эпическая", "col": Color("9b59d0"), "w": 10.0},
 	{"key": "legendary", "name": "Легендарная", "col": Color("f2b01e"), "w": 3.0},
+	{"key": "mythic", "name": "Сверхредкая", "col": Color("e8453c"), "w": 0.0},
 ]
 
 ## Проклятия: одноразовые, игрок включает их перед забегом.
@@ -48,31 +49,47 @@ static func missing_skins(save: Dictionary) -> Array:
 	return out
 
 
-## Награда игроку. {rarity, kind, value, label}
-static func roll_player(save: Dictionary) -> Dictionary:
+## Проклятия появляются только после того, как комната пройдена целиком (дорога на кухню),
+## и выпадают только в забегах на сложной комнате и выше.
+static func curses_open(meta: Dictionary) -> bool:
+	return int(Diff.data(meta).get("beaten", 0)) > 0
+
+
+## Награда игроку. {rarity, kind, value, label}. Новые юниты — сверхредкая награда.
+static func roll_player(save: Dictionary, meta: Dictionary, diff: int) -> Dictionary:
+	var miss_units := Units.missing(meta)
+	var since := int(save.get("eggs_since_unit", 0))
+	if miss_units.size() > 0 and randf() < 0.012 + 0.003 * float(since):
+		save["eggs_since_unit"] = 0
+		var u: String = miss_units[randi() % miss_units.size()]
+		return {"rarity": 4, "kind": "unit", "value": u, "label": "Новый юнит: %s!" % Units.by_key(u)["name"]}
+	save["eggs_since_unit"] = since + 1
 	var r := _roll_rarity()
+	var curse_ok := curses_open(meta) and diff >= 2
 	var keys := CURSES.keys()
 	var curse: String = keys[randi() % keys.size()]
 	match r:
 		0:
-			var n := randi_range(2, 3)
+			var n := randi_range(4, 6)
 			return {"rarity": r, "kind": "feathers", "value": n, "label": "+%d перьев" % n}
 		1:
-			if randf() < 0.6:
-				return {"rarity": r, "kind": "feathers", "value": 5, "label": "+5 перьев"}
-			return {"rarity": r, "kind": "curse", "value": curse, "n": 1, "label": "Проклятие «%s»" % CURSES[curse]["name"]}
+			if curse_ok and randf() < 0.4:
+				return {"rarity": r, "kind": "curse", "value": curse, "n": 1, "label": "Проклятие «%s»" % CURSES[curse]["name"]}
+			return {"rarity": r, "kind": "feathers", "value": 9, "label": "+9 перьев"}
 		2:
 			var ms := missing_skins(save)
 			if ms.size() > 0:
 				var sk: String = ms[randi() % ms.size()]
-				return {"rarity": r, "kind": "skin", "value": sk, "label": "Новая лапка: %s" % PawCursor.SKINS[sk]["name"]}
-			return {"rarity": r, "kind": "curse", "value": curse, "n": 2, "label": "Проклятие «%s» ×2" % CURSES[curse]["name"]}
+				return {"rarity": r, "kind": "skin", "value": sk, "feathers": 6, "label": "Новая лапка: %s" % PawCursor.SKINS[sk]["name"]}
+			if curse_ok:
+				return {"rarity": r, "kind": "curse", "value": curse, "n": 2, "label": "Проклятие «%s» ×2" % CURSES[curse]["name"]}
+			return {"rarity": r, "kind": "feathers", "value": 14, "label": "+14 перьев"}
 		_:
 			var ms := missing_skins(save)
 			if ms.size() > 0:
 				var sk: String = ms[randi() % ms.size()]
-				return {"rarity": r, "kind": "skin", "value": sk, "feathers": 12, "label": "%s и +12 перьев" % PawCursor.SKINS[sk]["name"]}
-			return {"rarity": r, "kind": "curse", "value": curse, "n": 3, "feathers": 12, "label": "«%s» ×3 и +12 перьев" % CURSES[curse]["name"]}
+				return {"rarity": r, "kind": "skin", "value": sk, "feathers": 15, "label": "%s и +15 перьев" % PawCursor.SKINS[sk]["name"]}
+			return {"rarity": r, "kind": "feathers", "value": 25, "label": "+25 перьев"}
 
 
 ## Награда попугаю: просо, изредка новое умение, совсем редко — новый попугай.
@@ -115,6 +132,10 @@ static func apply_player(save: Dictionary, rw: Dictionary) -> void:
 			if not own.has(rw["value"]):
 				own.append(rw["value"])
 			save["cursors"] = own
+		"unit":
+			var us := Units.owned(save["meta"])
+			if not us.has(rw["value"]):
+				us.append(rw["value"])
 		"curse":
 			var cs: Dictionary = save.get("curses", {})
 			cs[rw["value"]] = int(cs.get(rw["value"], 0)) + int(rw.get("n", 1))
@@ -141,14 +162,18 @@ static func apply_parrot(meta: Dictionary, rw: Dictionary) -> void:
 const STOP := 22
 
 
-static func reel(final: Dictionary, side: String) -> Array:
+static func reel(final: Dictionary, side: String, curses: bool = false) -> Array:
 	var out: Array = []
 	for i in STOP + 4:
 		var r := _roll_rarity(6.0)
 		var it := {"rarity": r}
 		if side == "player":
-			it["kind"] = ["feathers", "curse", "skin", "skin"][r]
-			it["value"] = "" if it["kind"] == "feathers" else (CURSES.keys()[randi() % CURSES.size()] if it["kind"] == "curse" else PawCursor.SKINS.keys()[randi() % PawCursor.SKINS.size()])
+			it["kind"] = ["feathers", "curse" if curses else "feathers", "skin", "unit"][r]
+			if it["kind"] == "unit":
+				it["rarity"] = 4
+				it["value"] = Units.LIST[randi() % Units.LIST.size()]["key"]
+			else:
+				it["value"] = "" if it["kind"] == "feathers" else (CURSES.keys()[randi() % CURSES.size()] if it["kind"] == "curse" else PawCursor.SKINS.keys()[randi() % PawCursor.SKINS.size()])
 		else:
 			it["kind"] = ["millet", "millet", "skill", "bird"][r]
 			it["value"] = "" if it["kind"] == "millet" else (Skills.EGG_SKILLS[randi() % Skills.EGG_SKILLS.size()] if it["kind"] == "skill" else Parrots.ORDER[1 + randi() % 3])

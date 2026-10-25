@@ -2,7 +2,7 @@ class_name Enemy
 extends RefCounted
 ## Один юнит орды. Данные без узла: двигает и рисует их главный цикл.
 
-enum T { SOCK, YARN, SLIPPER, SPRAYER, HAND, SUPER, DUST, BOX, BOSS }
+enum T { SOCK, YARN, SLIPPER, SPRAYER, HAND, SUPER, DUST, BOX, BOSS, REMOTE, PILLOW, BALL, CABLE, ALARM, SPONGE, CAR }
 
 var type: int = T.SOCK
 var id := 0
@@ -63,7 +63,7 @@ func top_speed() -> float:
 
 ## Кого лапка может схватить и бросить.
 func grabbable() -> bool:
-	return type == T.SOCK or type == T.YARN or type == T.DUST or type == T.SLIPPER
+	return type == T.SOCK or type == T.YARN or type == T.DUST or type == T.SLIPPER or type == T.BALL
 
 
 func is_big() -> bool:

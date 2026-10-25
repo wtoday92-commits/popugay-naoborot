@@ -2039,6 +2039,8 @@ func damage_enemy(e: Enemy, amount: float, kb: Vector2, show: bool = true, src: 
 			e.flash = 0.1
 			add_fx({"kind": "ring", "pos": e.pos, "r": e.radius + 10.0, "dur": 0.25, "color": Color(0.45, 0.65, 0.9, 0.9)})
 			return
+	if Skills.POWER.has(src):
+		amount *= float(Skills.POWER[src])
 	if src != "":
 		dealt_by_src[src] = float(dealt_by_src.get(src, 0.0)) + minf(amount, maxf(e.hp, 0.0))
 	e.hp -= amount
@@ -2802,6 +2804,16 @@ func _make_cards() -> Array:
 			for m in opts.slice(0, 2):
 				pool.append({"key": m, "lvl": 1, "new": true, "kind": "mod"})
 	pool.shuffle()
+	# пока у попугая меньше трёх умений, на выбор в основном новые умения (2–3),
+	# чтобы запрет одной карты не оставлял его с одними пассивками
+	if h.skills.size() < Skills.MAX_SKILLS:
+		var fresh: Array = pool.filter(func(c): return c["kind"] == "skill" and c["new"])
+		var rest: Array = pool.filter(func(c): return not (c["kind"] == "skill" and c["new"]))
+		var n_new := mini(fresh.size(), 3 if randf() < 0.6 else 2)
+		var out: Array = fresh.slice(0, n_new)
+		out.append_array(rest.slice(0, 3 - out.size()))
+		out.shuffle()
+		return out
 	return pool.slice(0, 3)
 
 

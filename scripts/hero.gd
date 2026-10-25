@@ -1249,7 +1249,8 @@ func _weapons(delta: float) -> void:
 				_beam(pos, dir, dmg)
 				if has_mod("mirror_double"):
 					_beam(pos, -dir, dmg)
-				cds[k] = 2.4 - 0.25 * lvl
+				# зеркальце бьёт редко, но сильно
+				cds[k] = (2.4 - 0.25 * lvl) * 1.5
 			"seed", "boomer", "gust", "mines", "song", "nut", "crest", "tornado", "stars", "laser", "mimic", "crestfan", "boom":
 				cds[k] = _new_skill(k, lvl)
 			"zap":
@@ -1783,7 +1784,8 @@ func score_card(card: Dictionary) -> Dictionary:
 	if card["kind"] == "skill":
 		# урон решает выживание: умения ценятся выше пассивок, особенно пока их мало
 		if card["new"]:
-			s += 4.0 if skills.size() < 2 else (2.5 if level < 8 else 0.5)
+			# попугай в первую очередь хочет набрать 3 умения
+			s += 6.0 if skills.size() < Skills.MAX_SKILLS else 0.5
 		else:
 			s += 1.5
 	s += randf_range(-0.5, 0.5)

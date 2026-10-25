@@ -685,6 +685,11 @@ func _unhandled_input(event_in: InputEvent) -> void:
 		return
 	# физическая клавиша: Q/W/R/M работают и в русской раскладке (там keycode — «Й», «Ц»…)
 	var code := k.physical_keycode if k.physical_keycode != KEY_NONE else k.keycode
+	# запасной путь: если раскладка русская и физический код не пришёл — по букве
+	var ru := {"й": KEY_Q, "ц": KEY_W, "к": KEY_R, "ь": KEY_M, "з": KEY_P}
+	var ch := String.chr(k.unicode).to_lower() if k.unicode > 0 else ""
+	if ru.has(ch):
+		code = ru[ch]
 	match code:
 		KEY_Q, KEY_1:
 			cast_meteor()

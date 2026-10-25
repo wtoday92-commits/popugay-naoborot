@@ -1421,11 +1421,16 @@ func _draw_paw(fr: int) -> void:
 		var k2: float = 1.0 - clampf(game.throw_cd / game.throw_cd_full(), 0.0, 1.0)
 		draw_arc(p, 32.0, 0, TAU, 32, Color(INK, 0.18), 4.0, true)
 		draw_arc(p, 32.0, -PI * 0.5, -PI * 0.5 + TAU * k2, 32, Color(0.42, 0.31, 0.7, 0.85), 4.0, true)
-	# таран: внутреннее кольцо поменьше, оранжевое
-	if game.ram_cd > 0.0 and game.time >= game.RAM_UNLOCK:
+	# таран: внутреннее кольцо сразу под кольцом рогатки (зазор 1,5 px), оранжевое;
+	# пока таран не открыт — серое кольцо заполняется до 0:20
+	if game.time < game.RAM_UNLOCK:
+		var k4: float = clampf(game.time / game.RAM_UNLOCK, 0.0, 1.0)
+		draw_arc(p, 26.5, 0, TAU, 32, Color(INK, 0.12), 3.0, true)
+		draw_arc(p, 26.5, -PI * 0.5, -PI * 0.5 + TAU * k4, 32, Color(0.55, 0.55, 0.6, 0.8), 3.0, true)
+	elif game.ram_cd > 0.0:
 		var k3: float = 1.0 - clampf(game.ram_cd / game.RAM_CD, 0.0, 1.0)
-		draw_arc(p + Vector2(0, 3), 22.0, 0, TAU, 28, Color(INK, 0.15), 3.0, true)
-		draw_arc(p + Vector2(0, 3), 22.0, -PI * 0.5, -PI * 0.5 + TAU * k3, 28, Color(0.88, 0.5, 0.15, 0.9), 3.0, true)
+		draw_arc(p, 26.5, 0, TAU, 32, Color(INK, 0.15), 3.0, true)
+		draw_arc(p, 26.5, -PI * 0.5, -PI * 0.5 + TAU * k3, 32, Color(0.88, 0.5, 0.15, 0.9), 3.0, true)
 	if game.throw_ready_flash > 0.0:
 		var f: float = game.throw_ready_flash / 0.45
 		draw_arc(p, 30.0 + 18.0 * (1.0 - f), 0, TAU, 32, Color(0.42, 0.31, 0.7, f), 4.0, true)

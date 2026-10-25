@@ -3220,8 +3220,10 @@ const ABILITY_ORDER := ["throw", "ram", "millet", "book", "basket"]
 
 func ability_unlocked(k: String) -> bool:
 	match k:
-		"throw", "ram":
+		"throw":
 			return true
+		"ram":
+			return time >= RAM_UNLOCK
 		"millet":
 			return Meta.unlocked(meta, "millet") and millet_unlocked
 		"book":

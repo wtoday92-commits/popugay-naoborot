@@ -294,9 +294,6 @@ func _draw_gem(g: Dictionary, fr: int) -> void:
 		return
 	if g["big"]:
 		var sd: int = int(g["id"]) + fr
-		# подмена готова — крупный колосок подсвечен фиолетовым кольцом
-		if game.millet_cd <= 0.0 and game.ability_unlocked("millet") and game.over == "":
-			draw_arc(p, 20.0 + 2.0 * sin(_time * 5.0), 0, TAU, 24, Color(0.42, 0.31, 0.7, 0.75), 2.5, true)
 		draw_line(p + Vector2(-2, 13) * pop, p + Vector2(3, -13) * pop, Color("b98c34"), 2.0, true)
 		Art.blob(self, p, 6.5 * pop, 12.5 * pop, Color("f5c84c"), 2.0, sd, 0.25, Color("a0742a"))
 		for k in 4:

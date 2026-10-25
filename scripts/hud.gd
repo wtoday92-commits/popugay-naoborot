@@ -23,8 +23,6 @@ var _shown := {}
 var hq_tab := "trees"
 ## Сундук на экране меты: расцветки лапки и проклятия.
 var chest_open := false
-## Где сейчас кнопки умений справа: по ним можно кликать.
-var btn_rects := {}
 var hq_abil := "throw"
 
 
@@ -402,9 +400,7 @@ func _draw_buttons(h: Hero, fr: int) -> void:
 	Art.card(self, Rect2(x + 10, 372, 320, height), PANEL, fr + 7)
 	_t(Vector2(x + 24, 396), "Ваши руки", 16)
 	var y := 408.0
-	btn_rects.clear()
 	for k in vis:
-		btn_rects[k] = Rect2(Vector2(x + 20, y), Vector2(300, 66))
 		var dx := _slide("btn_" + k, true, false)
 		draw_set_transform(Vector2(dx, 0))
 		_ability(k, Vector2(x + 20, y), edge)
@@ -433,20 +429,14 @@ func _ability(k: String, p: Vector2, edge: bool) -> void:
 			cd_max = game.MILLET_CD
 			if not on:
 				sub = "ждёт первый крупный колосок"
-			elif cd <= 0.0:
-				sub = "клик по крупному колоску (светится)"
 		"book":
 			cd = game.meteor_cd
 			cd_max = game.METEOR_CD
-			if on and cd <= 0.0:
-				sub = "клик сюда или Q, потом клик по полю"
 			if not on:
 				sub = "откроется через %s" % mmss(game.BOOK_UNLOCK - game.time)
 		"basket":
 			cd = game.wave_cd
 			cd_max = game.WAVE_CD
-			if on and cd <= 0.0:
-				sub = "клик сюда или W, потом клик по полю"
 			if not on:
 				sub = "откроется через %s" % mmss(game.WAVE_UNLOCK - game.time)
 	_button(p, info[0], info[1], info[2], sub, cd, cd_max, on, edge and k != "throw")
@@ -1426,12 +1416,6 @@ func _draw_paw(fr: int) -> void:
 		PawCursor.draw_paw(self, p, sk, 4.0 if game.throw_cd > 0.0 else 0.0, game.throw_cd > 0.0 or game.paw_bruise > 0.0)
 	if game.over != "" or game.phase != "play":
 		return
-	if game.aim_tool != "":
-		# прицел книги или клетки после клика по кнопке
-		var rr: float = game.METEOR_R if game.aim_tool == "book" else game.BASKET_R
-		draw_arc(p, rr, 0, TAU, 40, Color(0.42, 0.31, 0.7, 0.8), 2.5, true)
-		draw_line(p - Vector2(10, 0), p + Vector2(10, 0), Color(0.42, 0.31, 0.7, 0.8), 2.0)
-		draw_line(p - Vector2(0, 10), p + Vector2(0, 10), Color(0.42, 0.31, 0.7, 0.8), 2.0)
 	# откат рогатки: кольцо вокруг лапки заполняется, пока не будет готово
 	if game.throw_cd > 0.0:
 		var k2: float = 1.0 - clampf(game.throw_cd / game.throw_cd_full(), 0.0, 1.0)

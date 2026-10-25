@@ -558,6 +558,19 @@ func _process(delta: float) -> void:
 	if shot_cage and shot_at > 0.0 and time > shot_at - 2.4 and wave_cd <= 0.0 and ability_unlocked("basket"):
 		paw["pos"] = hero.pos
 		cast_wave()
+	if OS.get_cmdline_user_args().has("--autocast") and phase == "play":
+		for tt in [[125.0, KEY_Q], [185.0, KEY_W]]:
+			var tag := "ac%d" % int(tt[0])
+			if time >= float(tt[0]) and not hints_shown.has(tag):
+				hints_shown[tag] = true
+				paw["pos"] = hero.pos + Vector2(80, 0)
+				var ev := InputEventKey.new()
+				ev.keycode = tt[1]
+				ev.physical_keycode = tt[1]
+				ev.pressed = true
+				Input.parse_input_event(ev)
+				await get_tree().process_frame
+				print("AUTOCAST %s: meteors=%d book_ok=%s cage_ok=%s cd=%.1f/%.1f paw=%s field=%s lvlup=%s" % [tag, meteors.size(), ability_unlocked("book"), ability_unlocked("basket"), meteor_cd, wave_cd, paw["pos"], FIELD.has_point(paw["pos"]), not levelup.is_empty()])
 	if shot_waves and hud != null:
 		hud.hq_tab = "waves"
 	if not shot_cage and shot_at > 0.0 and time > shot_at - 0.8 and meteor_cd <= 0.0 and ability_unlocked("book"):
@@ -670,7 +683,9 @@ func _unhandled_input(event_in: InputEvent) -> void:
 	var k := event_in as InputEventKey
 	if k == null or not k.pressed or k.echo:
 		return
-	match k.keycode:
+	# физическая клавиша: Q/W/R/M работают и в русской раскладке (там keycode — «Й», «Ц»…)
+	var code := k.physical_keycode if k.physical_keycode != KEY_NONE else k.keycode
+	match code:
 		KEY_Q, KEY_1:
 			cast_meteor()
 		KEY_W, KEY_2:

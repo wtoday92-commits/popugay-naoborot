@@ -70,26 +70,26 @@ static func roll_player(save: Dictionary, meta: Dictionary, diff: int) -> Dictio
 	var curse: String = keys[randi() % keys.size()]
 	match r:
 		0:
-			var n := randi_range(4, 6)
+			var n := randi_range(2, 3)
 			return {"rarity": r, "kind": "feathers", "value": n, "label": "+%d перьев" % n}
 		1:
 			if curse_ok and randf() < 0.4:
 				return {"rarity": r, "kind": "curse", "value": curse, "n": 1, "label": "Проклятие «%s»" % CURSES[curse]["name"]}
-			return {"rarity": r, "kind": "feathers", "value": 9, "label": "+9 перьев"}
+			return {"rarity": r, "kind": "feathers", "value": 5, "label": "+5 перьев"}
 		2:
 			var ms := missing_skins(save)
 			if ms.size() > 0:
 				var sk: String = ms[randi() % ms.size()]
-				return {"rarity": r, "kind": "skin", "value": sk, "feathers": 6, "label": "Новая лапка: %s" % PawCursor.SKINS[sk]["name"]}
+				return {"rarity": r, "kind": "skin", "value": sk, "label": "Новая лапка: %s" % PawCursor.SKINS[sk]["name"]}
 			if curse_ok:
 				return {"rarity": r, "kind": "curse", "value": curse, "n": 2, "label": "Проклятие «%s» ×2" % CURSES[curse]["name"]}
-			return {"rarity": r, "kind": "feathers", "value": 14, "label": "+14 перьев"}
+			return {"rarity": r, "kind": "feathers", "value": 8, "label": "+8 перьев"}
 		_:
 			var ms := missing_skins(save)
 			if ms.size() > 0:
 				var sk: String = ms[randi() % ms.size()]
-				return {"rarity": r, "kind": "skin", "value": sk, "feathers": 15, "label": "%s и +15 перьев" % PawCursor.SKINS[sk]["name"]}
-			return {"rarity": r, "kind": "feathers", "value": 25, "label": "+25 перьев"}
+				return {"rarity": r, "kind": "skin", "value": sk, "label": "Новая лапка: %s" % PawCursor.SKINS[sk]["name"]}
+			return {"rarity": r, "kind": "feathers", "value": 12, "label": "+12 перьев"}
 
 
 ## Награда попугаю: просо, изредка новое умение, совсем редко — новый попугай.
@@ -114,12 +114,12 @@ static func roll_parrot(meta: Dictionary) -> Dictionary:
 		if miss_skills.size() > 0:
 			var k: String = miss_skills[randi() % miss_skills.size()]
 			return {"rarity": r, "kind": "skill", "value": k, "label": "Умение «%s»" % Skills.NAMES[k]}
-		return {"rarity": r, "kind": "millet", "value": 2000, "label": "+2000 проса"}
+		return {"rarity": r, "kind": "millet", "value": 2500, "label": "+2500 проса"}
 	p["eggs_since_leg"] = since + 1
 	if r == 2 and miss_skills.size() > 0:
 		var k: String = miss_skills[randi() % miss_skills.size()]
 		return {"rarity": r, "kind": "skill", "value": k, "label": "Умение «%s»" % Skills.NAMES[k]}
-	var amount: int = [150, 400, 900][r]
+	var amount: int = [300, 700, 1200][r]
 	return {"rarity": r, "kind": "millet", "value": amount, "label": "+%d проса" % amount}
 
 

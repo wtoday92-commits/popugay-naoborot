@@ -3520,7 +3520,8 @@ func _save_run(feathers: int) -> void:
 	st["chests"] = int(st.get("chests", 0)) + hero.chests_opened
 	st["millet"] = int(st.get("millet", 0)) + run_millet
 	var last := {"won": boss_defeated, "millet": run_millet, "quest_results": [], "bought": [], "offer": [], "picked": [], "feathers": feathers}
-	var bank := int(float(run_millet) * float(Diff.level(diff)["millet"]))
+	# попугай качается быстрее: в копилку идёт полтора собранного проса
+	var bank := int(float(run_millet) * float(Diff.level(diff)["millet"]) * 1.5)
 	for q in hero.quests:
 		var ok := Meta.quest_done(q, r)
 		last["quest_results"].append([q, ok])

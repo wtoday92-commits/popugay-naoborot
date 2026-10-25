@@ -219,6 +219,8 @@ var hq_test: Array = []
 var waves_test: Array = []
 ## Системный курсор-лапка: картинки по состояниям и текущее состояние.
 var cursor_imgs := {}
+## Книга или клетка, выбранная кликом по кнопке: следующий клик по полю — туда она и упадёт.
+var aim_tool := ""
 var cursor_state := ""
 var _cursor_building := false
 var throw_ready_flash := 0.0
@@ -367,6 +369,7 @@ func start_run() -> void:
 	throw_cd = 0.0
 	paw_bruise = 0.0
 	ram_cd = 0.0
+	aim_tool = ""
 	held_e = null
 	menu = {}
 	aim = {}
@@ -704,6 +707,9 @@ func _mouse_button(mb: InputEventMouseButton) -> void:
 			return
 		if phase != "play":
 			return
+		if mb.pressed and aim_tool != "":
+			aim_tool = ""
+			return
 		if mb.pressed and (not menu.is_empty() or not aim.is_empty()):
 			menu = {}
 			aim = {}
@@ -726,6 +732,29 @@ func _mouse_button(mb: InputEventMouseButton) -> void:
 	if mb.pressed:
 		if p.x < FIELD.position.x:
 			drag = hud.queue_press(p)
+			return
+		if p.x > FIELD.end.x:
+			# клик по кнопке умения справа: книга и клетка — прицел, следующий клик по полю
+			for k in hud.btn_rects:
+				if Rect2(hud.btn_rects[k]).has_point(p):
+					if (k == "book" or k == "basket") and ability_unlocked(k):
+						aim_tool = "" if aim_tool == k else k
+						sfx("tick", -4.0, 1.2)
+						show_hint("Кликните по полю: туда упадёт %s." % ("книга" if k == "book" else "клетка"), 3.0)
+					elif k == "millet":
+						show_hint("Подмена проса: кликните по крупному колоску на поле — он подсвечен, когда подмена готова.", 4.0)
+					elif k == "throw":
+						show_hint("Рогатка: зажмите ЛКМ на носке или тапке, оттяните лапку назад и отпустите.", 4.0)
+					elif k == "ram":
+						show_hint("Таран: резко махните лапкой сквозь попугая.", 4.0)
+			return
+		if aim_tool != "" and FIELD.has_point(p):
+			var tool := aim_tool
+			aim_tool = ""
+			if tool == "book":
+				cast_meteor()
+			else:
+				cast_wave()
 			return
 		if over != "" or paused:
 			return

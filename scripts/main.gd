@@ -35,9 +35,10 @@ const MILLET_CD := 30.0
 const PAW_PUSH_R := 1.5 * M
 const PAW_HIT_R := 26.0
 const PAW_PUSH_MAX := 12
-const PAW_BRUISE := 1.6
+const PAW_BRUISE := 2.0
+const PAW_BRUISED_SPEED := 380.0
 const GRAB_R := 28.0
-const THROW_CD := 3.0
+const THROW_CD := 4.5
 const MAX_ENEMIES := 160
 const MAX_GEMS := 400
 const CELL := 40.0
@@ -310,7 +311,8 @@ func _update_cursor() -> void:
 	if held_e != null:
 		st = "empty"
 	elif paw_bruise > 0.0:
-		st = "bruised"
+		# ушибленную лапку рисует игра (она отстаёт), системный курсор — только точка
+		st = "empty"
 	elif throw_cd > 0.0 and phase == "play" and over == "":
 		st = "cd"
 	if st == cursor_state:
@@ -738,8 +740,9 @@ func _update_paw(dt: float) -> void:
 	var old: Vector2 = paw["pos"]
 	var p := m
 	if paw_bruise > 0.0:
-		# ушибленная лапка двигается как обычно, только не таранит
+		# ушибленная лапка отстаёт от мыши: 2 с вместо прежних 4
 		paw_bruise = maxf(0.0, paw_bruise - dt)
+		p = old.move_toward(m, PAW_BRUISED_SPEED * dt)
 	if held_e != null:
 		# рогатка: лапка привязана к резинке и не уходит дальше натяга (и мышь тоже)
 		var lim := sling_max()
@@ -2575,9 +2578,9 @@ func on_fruit_eaten(f: String) -> void:
 const LU_PICK := 1.2
 const LU_SLOW := 1.8
 const LU_END := 2.4
-const SLING_BASE := 130.0
+const SLING_BASE := 115.0
 const SLING_STEP := 30.0
-const SOCK_SPEED_BASE := 1150.0
+const SOCK_SPEED_BASE := 1050.0
 const SOCK_SPEED_STEP := 250.0
 
 
@@ -2607,7 +2610,7 @@ func curse_cd() -> float:
 
 
 func throw_cd_full() -> float:
-	return maxf(1.0, THROW_CD - pk("throw_cd")) * curse_cd()
+	return maxf(2.5, THROW_CD - pk("throw_cd")) * curse_cd()
 
 
 func book_cd_full() -> float:
@@ -2959,6 +2962,8 @@ func _selftest_step() -> void:
 		_st_done[key] = true
 		match st[1]:
 			"queue":
+				if queue.size() < 3:
+					continue
 				var before: String = queue[1]["type"]
 				move_queue(1, 2)
 				print("ТЕСТ очередь: %s -> %s" % [before, queue[2]["type"]])

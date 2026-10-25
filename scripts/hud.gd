@@ -1378,7 +1378,17 @@ func _draw_paw(fr: int) -> void:
 		draw_rect(br, INK, false, 1.5)
 		PawCursor.draw_paw(self, p, sk, 4.0, false)
 		return
-	if game.cursor_imgs.is_empty():
+	if game.paw_bruise > 0.0:
+		# ушиб: лапка отстаёт от мыши, пунктир показывает, куда она тянется
+		var m := get_global_mouse_position()
+		draw_dashed_line(p, m, Color(INK, 0.35), 1.5, 6.0)
+		draw_circle(m, 3.0, Color(INK, 0.5))
+		PawCursor.draw_paw(self, p, sk, 1.0, true)
+		draw_arc(p, 30.0, -PI * 0.5, -PI * 0.5 + TAU * (1.0 - game.paw_bruise / game.PAW_BRUISE), 32, Color(0.85, 0.5, 0.2, 0.85), 5.0, true)
+		for k in 3:
+			var a := Time.get_ticks_msec() * 0.006 + k * TAU / 3.0
+			draw_circle(p + Vector2(cos(a) * 20.0, -24 + sin(a) * 6.0), 2.5, Color("f6cd56"))
+	elif game.cursor_imgs.is_empty():
 		# пока картинки курсора не готовы (или в снимках) — рисуем лапку сами
 		PawCursor.draw_paw(self, p, sk, 4.0 if game.throw_cd > 0.0 else 0.0, game.throw_cd > 0.0 or game.paw_bruise > 0.0)
 	if game.over != "" or game.phase != "play":
